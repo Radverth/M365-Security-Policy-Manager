@@ -14,7 +14,6 @@ jobs:
       contents: write
     outputs:
       version: ${{ steps.bump.outputs.version }}
-      release_id: ${{ steps.create-release.outputs.release_id }}
 
     steps:
       - name: Checkout
@@ -48,17 +47,14 @@ jobs:
           echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Create draft release
-        id: create-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          RELEASE_ID=$(gh release create "v${{ steps.bump.outputs.version }}" \
+          gh release create "v${{ steps.bump.outputs.version }}" \
             --title "v${{ steps.bump.outputs.version }}" \
             --generate-notes \
             --draft \
-            --repo "${{ github.repository }}" \
-            --json id -q '.id')
-          echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
+            --repo "${{ github.repository }}"
 
   # ── 2. Build on all platforms ───────────────────────────────────────────────
   build:
