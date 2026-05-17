@@ -473,21 +473,23 @@ function CategoryDetail({ category, policies, selected, onTogglePolicy, onToggle
       />
 
       {/* Policy list */}
-      <div className="space-y-1.5 max-h-[360px] overflow-y-auto pr-1">
-        {filtered.map((p) => {
+      <div className="rounded-lg border border-gray-200 overflow-hidden max-h-[360px] overflow-y-auto">
+        {filtered.map((p, i) => {
           const isSelected = selected.includes(p.id)
           return (
             <button
               key={p.id}
               onClick={() => onTogglePolicy(p.id)}
               className={[
-                'w-full text-left flex items-start gap-3 px-3 py-2.5 rounded-lg border transition-all',
-                isSelected
-                  ? 'border-navy bg-navy-50'
-                  : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50',
+                'w-full text-left flex items-center gap-3 px-3 py-2 transition-colors relative',
+                i > 0 ? 'border-t border-gray-100' : '',
+                isSelected ? 'bg-blue-50' : 'bg-white hover:bg-gray-50',
               ].join(' ')}
             >
-              <div className={`mt-0.5 w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-colors ${
+              {/* selection accent bar */}
+              <span className={`absolute left-0 top-0 bottom-0 w-0.5 transition-colors ${isSelected ? 'bg-navy' : 'bg-transparent'}`} />
+              {/* checkbox */}
+              <div className={`w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-colors ${
                 isSelected ? 'bg-navy border-navy' : 'border-gray-300 bg-white'
               }`}>
                 {isSelected && (
@@ -496,14 +498,15 @@ function CategoryDetail({ category, policies, selected, onTogglePolicy, onToggle
                   </svg>
                 )}
               </div>
+              {/* id */}
+              <span className="text-xs font-mono text-gray-400 w-10 flex-shrink-0">{p.id}</span>
+              {/* name + description */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-mono text-gray-400 flex-shrink-0">{p.id}</span>
-                  <span className={`text-sm font-medium ${isSelected ? 'text-navy' : 'text-gray-800'}`}>{p.name}</span>
-                  {severityBadge(p.severity)}
-                </div>
-                {p.description && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{p.description}</p>}
+                <span className="text-sm text-gray-800 leading-tight">{p.name}</span>
+                {p.description && <p className="text-xs text-gray-400 truncate leading-tight mt-0.5">{p.description}</p>}
               </div>
+              {/* severity */}
+              {severityBadge(p.severity)}
             </button>
           )
         })}
