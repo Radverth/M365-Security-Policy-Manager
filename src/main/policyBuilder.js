@@ -843,12 +843,28 @@ function buildPolicyScript(policy, config, prefix) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+function buildModuleImports(graph, exo, ipps) {
+  const lines = []
+  if (graph) lines.push(
+    `if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) { Write-Output "ERROR: Microsoft.Graph module not found — install it on the Modules page"; exit 1 }`,
+    `Import-Module Microsoft.Graph.Authentication -ErrorAction Stop`,
+    `Import-Module Microsoft.Graph.Identity.SignIns -ErrorAction SilentlyContinue`,
+    `Import-Module Microsoft.Graph.DeviceManagement -ErrorAction SilentlyContinue`,
+    `Import-Module Microsoft.Graph -ErrorAction SilentlyContinue`
+  )
+  if (exo) lines.push(
+    `if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) { Write-Output "ERROR: ExchangeOnlineManagement module not found — install it on the Modules page"; exit 1 }`,
+    `Import-Module ExchangeOnlineManagement -ErrorAction Stop`
+  )
+  return lines.join('\n')
+}
+
 function buildScript(policies, credentials, prefix, authMode = 'interactive', policyConfigs = {}) {
   const hasGraph = policies.some(p => !needsExo(p))
   const hasExo   = policies.some(p => needsExo(p))
   const hasIpps  = policies.some(p => needsIpps(p))
 
-  const parts = [PS_PREFS, '']
+  const parts = [PS_PREFS, '', buildModuleImports(hasGraph, hasExo, hasIpps), '']
 
   if (hasGraph) parts.push(buildConnectGraph(credentials, authMode))
   if (hasExo)   parts.push(buildConnectExo(credentials))

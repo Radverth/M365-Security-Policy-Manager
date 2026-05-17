@@ -114,6 +114,12 @@ function registerIpcHandlers(win) {
 
     const script = `
 $ProgressPreference = 'SilentlyContinue'
+if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
+  Write-Output "ERROR: Microsoft.Graph module not found — install it on the Modules page"
+  exit 1
+}
+Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+Import-Module Microsoft.Graph.Identity.SignIns -ErrorAction SilentlyContinue
 try {
   Write-Output "Connecting to Microsoft Graph..."
   Connect-MgGraph -Scopes "Policy.Read.All" -NoWelcome ${loginHint}
@@ -171,8 +177,10 @@ try {
     return { logs, results }
   })
 
+  const MG_IMPORT = `Import-Module Microsoft.Graph.Authentication -ErrorAction SilentlyContinue\nImport-Module Microsoft.Graph.Identity.SignIns -ErrorAction SilentlyContinue\n`
+
   ipcMain.handle('policies:update', async (_, id, patch) => {
-    const script = `
+    const script = `${MG_IMPORT}
 $params = '${JSON.stringify(patch)}' | ConvertFrom-Json -AsHashtable
 Update-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId '${id}' -BodyParameter $params
 Write-Output "SUCCESS"
@@ -182,13 +190,13 @@ Write-Output "SUCCESS"
   })
 
   ipcMain.handle('policies:delete', async (_, id) => {
-    const script = `Remove-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId '${id}' -Confirm:$false\nWrite-Output "SUCCESS"`
+    const script = `${MG_IMPORT}\nRemove-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId '${id}' -Confirm:$false\nWrite-Output "SUCCESS"`
     const { exitCode } = await runScript(script, null, null)
     return { success: exitCode === 0 }
   })
 
   ipcMain.handle('policies:toggleState', async (_, id, state) => {
-    const script = `Update-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId '${id}' -State '${state}'\nWrite-Output "SUCCESS"`
+    const script = `${MG_IMPORT}\nUpdate-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId '${id}' -State '${state}'\nWrite-Output "SUCCESS"`
     const { exitCode } = await runScript(script, null, null)
     return { success: exitCode === 0 }
   })
