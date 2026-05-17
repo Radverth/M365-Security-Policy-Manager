@@ -1,15 +1,18 @@
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, Menu } = require('electron')
 const path = require('path')
 const { registerIpcHandlers } = require('./ipcHandlers')
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
 function createWindow() {
+  Menu.setApplicationMenu(null)
+
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 1024,
     minHeight: 600,
+    autoHideMenuBar: true,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     backgroundColor: '#F8F9FC',
     webPreferences: {
