@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import useStore from '../store'
 import Card from '../components/Card'
 import Button from '../components/Button'
@@ -12,7 +12,7 @@ function stateBadge(state) {
   const s = state.toLowerCase()
   if (s === 'enabled') return <Badge variant="success">Enabled</Badge>
   if (s === 'disabled') return <Badge variant="neutral">Disabled</Badge>
-  if (s === 'enabledforReportingButNotEnforced' || s === 'report-only') return <Badge variant="info">Report Only</Badge>
+  if (s.includes('report')) return <Badge variant="info">Report Only</Badge>
   return <Badge variant="neutral">{state}</Badge>
 }
 
@@ -21,7 +21,6 @@ function formatDate(d) {
   try { return new Date(d).toLocaleDateString() } catch { return d }
 }
 
-// Simple JSON editor without Monaco (Monaco is large; use textarea as fallback)
 function JsonEditor({ value, onChange }) {
   const [text, setText] = useState(typeof value === 'string' ? value : JSON.stringify(value, null, 2))
   const [error, setError] = useState('')
@@ -31,13 +30,8 @@ function JsonEditor({ value, onChange }) {
         value={text}
         onChange={(e) => {
           setText(e.target.value)
-          try {
-            JSON.parse(e.target.value)
-            setError('')
-            onChange?.(e.target.value)
-          } catch {
-            setError('Invalid JSON')
-          }
+          try { JSON.parse(e.target.value); setError(''); onChange?.(e.target.value) }
+          catch { setError('Invalid JSON') }
         }}
         rows={18}
         className="block w-full font-mono text-xs border border-gray-300 rounded-md p-3 focus:border-navy focus:ring-1 focus:ring-navy resize-none bg-gray-950 text-green-400"
@@ -47,10 +41,141 @@ function JsonEditor({ value, onChange }) {
   )
 }
 
-export default function ManagePolicies() {
-  const { orgs, orgsLoading, loadOrgs, settings, addNotification } = useStore()
+// ── Auth mode selector ────────────────────────────────────────────────────────
+function AuthModeSelector({ mode, onChange }) {
+  const modes = [
+    { id: 'itglue',      label: 'IT Glue',       icon: '🔗', desc: 'Resolve org credentials from IT Glue' },
+    { id: 'interactive', label: 'WAM / Browser',  icon: '🌐', desc: 'Sign in interactively via browser or device code' },
+  ]
+  return (
+    <div className="grid grid-cols-2 gap-3 mb-4">
+      {modes.map((m) => (
+        <button
+          key={m.id}
+          onClick={() => onChange(m.id)}
+          className={[
+            'relative flex items-center gap-3 px-4 py-3 rounded-lg border-2 text-left transition-all',
+            mode === m.id ? 'border-navy bg-navy-50' : 'border-gray-200 hover:border-gray-300 bg-white',
+          ].join(' ')}
+        >
+          <span className="text-lg leading-none">{m.icon}</span>
+          <div>
+            <p className={`text-sm font-semibold ${mode === m.id ? 'text-navy' : 'text-gray-700'}`}>{m.label}</p>
+            <p className="text-xs text-gray-500">{m.desc}</p>
+          </div>
+          {mode === m.id && <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-navy" />}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── IT Glue connection form ───────────────────────────────────────────────────
+function ItGlueConnect({ credentials, setCredentials }) {
+  const { orgs, orgsLoading, loadOrgs, settings } = useStore()
   const [selectedOrg, setSelectedOrg] = useState(null)
-  const [credentials, setCredentials] = useState({ username: '', password: '', tenantId: '' })
+  const [passwords, setPasswords] = useState([])
+  const [pwLoading, setPwLoading] = useState(false)
+
+  useEffect(() => {
+    if (settings.itGlueApiKey) loadOrgs()
+  }, [])
+
+  useEffect(() => {
+    if (!selectedOrg || !window.api) return
+    setPwLoading(true)
+    setCredentials(null)
+    window.api.itglue.getPasswords(selectedOrg.id)
+      .then((res) => setPasswords(res || []))
+      .catch(() => setPasswords([]))
+      .finally(() => setPwLoading(false))
+  }, [selectedOrg?.id])
+
+  if (!settings.itGlueApiKey) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+        IT Glue API key not configured. Go to Settings to add your key, or use WAM / Browser mode.
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      {/* Org picker */}
+      <div>
+        <p className="text-xs font-medium text-gray-600 mb-1.5">Organisation</p>
+        <div className="max-h-40 overflow-y-auto space-y-1 border border-gray-200 rounded-lg p-1">
+          {orgsLoading ? (
+            Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-9 bg-gray-100 rounded animate-pulse" />)
+          ) : orgs.length === 0 ? (
+            <p className="text-xs text-gray-400 p-3 text-center">No organisations found</p>
+          ) : orgs.map((o) => (
+            <button
+              key={o.id}
+              onClick={() => setSelectedOrg(o)}
+              className={[
+                'w-full text-left px-3 py-2 rounded text-sm transition-colors',
+                selectedOrg?.id === o.id ? 'bg-navy text-white font-medium' : 'hover:bg-gray-50 text-gray-800',
+              ].join(' ')}
+            >
+              {o.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Password picker */}
+      <div>
+        <p className="text-xs font-medium text-gray-600 mb-1.5">Credential</p>
+        <div className="max-h-40 overflow-y-auto space-y-1 border border-gray-200 rounded-lg p-1">
+          {!selectedOrg ? (
+            <p className="text-xs text-gray-400 p-3 text-center">Select an organisation first</p>
+          ) : pwLoading ? (
+            Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-9 bg-gray-100 rounded animate-pulse" />)
+          ) : passwords.length === 0 ? (
+            <p className="text-xs text-gray-400 p-3 text-center">No passwords found</p>
+          ) : passwords.map((pw) => (
+            <button
+              key={pw.id}
+              onClick={() => setCredentials({ username: pw.username, password: pw.password, tenantId: '' })}
+              className={[
+                'w-full text-left px-3 py-2 rounded text-sm transition-colors',
+                credentials?.username === pw.username ? 'bg-navy text-white font-medium' : 'hover:bg-gray-50 text-gray-800',
+              ].join(' ')}
+            >
+              <p className="font-medium truncate">{pw.name}</p>
+              <p className={`text-xs truncate ${credentials?.username === pw.username ? 'text-white/70' : 'text-gray-400'}`}>{pw.username}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── WAM connection form ───────────────────────────────────────────────────────
+function WamConnect() {
+  return (
+    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-2">
+      <div className="flex items-center gap-2">
+        <svg className="w-5 h-5 text-blue-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
+        </svg>
+        <p className="text-sm font-semibold text-blue-800">Interactive / WAM sign-in</p>
+      </div>
+      <p className="text-sm text-blue-700">
+        Clicking Load Policies will open a browser sign-in window. Sign in with your Global Admin or Security Admin account — MFA is fully supported.
+      </p>
+    </div>
+  )
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+export default function ManagePolicies() {
+  const { addNotification } = useStore()
+  const [authMode, setAuthMode] = useState('itglue')
+  const [credentials, setCredentials] = useState(null)
+  const [connected, setConnected] = useState(false)
   const [policies, setPolicies] = useState([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
@@ -63,17 +188,24 @@ export default function ManagePolicies() {
   const [editJson, setEditJson] = useState('')
   const [saveLoading, setSaveLoading] = useState(false)
 
-  useEffect(() => {
-    if (settings.itGlueApiKey) loadOrgs()
-  }, [])
+  const handleAuthModeChange = (mode) => {
+    setAuthMode(mode)
+    setCredentials(null)
+    setConnected(false)
+    setPolicies([])
+  }
+
+  const canLoad = authMode === 'interactive' || !!(credentials?.username && credentials?.password)
 
   const handleLoad = async () => {
-    if (!window.api || !credentials.username || !credentials.password) return
+    if (!window.api || !canLoad) return
     setLoading(true)
     try {
-      const result = await window.api.policies.list(credentials)
+      const creds = authMode === 'interactive' ? { interactive: true } : credentials
+      const result = await window.api.policies.list(creds, authMode)
       setPolicies(Array.isArray(result) ? result : [])
       setSelectedRows(new Set())
+      setConnected(true)
     } catch (err) {
       addNotification('Failed to load policies: ' + err.message, 'error')
     } finally {
@@ -86,15 +218,12 @@ export default function ManagePolicies() {
     const q = search.toLowerCase()
     return (
       (p.DisplayName || '').toLowerCase().includes(q) ||
-      (p.State || '').toLowerCase().includes(q) ||
-      (p.Id || '').toLowerCase().includes(q)
+      (p.State || '').toLowerCase().includes(q)
     )
   })
 
   const toggleRow = (id) => setSelectedRows((s) => {
-    const ns = new Set(s)
-    ns.has(id) ? ns.delete(id) : ns.add(id)
-    return ns
+    const ns = new Set(s); ns.has(id) ? ns.delete(id) : ns.add(id); return ns
   })
 
   const toggleAll = () => {
@@ -152,10 +281,7 @@ export default function ManagePolicies() {
     }
   }
 
-  const handleEdit = (policy) => {
-    setEditTarget(policy)
-    setEditJson(JSON.stringify(policy, null, 2))
-  }
+  const handleEdit = (policy) => { setEditTarget(policy); setEditJson(JSON.stringify(policy, null, 2)) }
 
   const handleSaveEdit = async () => {
     if (!window.api || !editTarget) return
@@ -177,57 +303,24 @@ export default function ManagePolicies() {
     <div className="p-8 max-w-7xl mx-auto">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">Manage Policies</h1>
-        <p className="mt-1 text-sm text-gray-500">View and manage existing Conditional Access policies</p>
+        <p className="mt-1 text-sm text-gray-500">View and manage Conditional Access policies for a connected tenant</p>
       </div>
 
-      {/* Connection */}
+      {/* Connection card */}
       <Card className="mb-6">
         <Card.Header>
           <h2 className="text-sm font-semibold text-gray-900">Tenant Connection</h2>
         </Card.Header>
-        <Card.Body>
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-            <div className="sm:col-span-1">
-              <label className="block text-xs font-medium text-gray-600 mb-1">Username / UPN</label>
-              <input
-                type="text"
-                value={credentials.username}
-                onChange={(e) => setCredentials((c) => ({ ...c, username: e.target.value }))}
-                placeholder="admin@tenant.com"
-                className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
-              />
-            </div>
-            <div className="sm:col-span-1">
-              <label className="block text-xs font-medium text-gray-600 mb-1">Password</label>
-              <input
-                type="password"
-                value={credentials.password}
-                onChange={(e) => setCredentials((c) => ({ ...c, password: e.target.value }))}
-                placeholder="Password"
-                className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
-              />
-            </div>
-            <div className="sm:col-span-1">
-              <label className="block text-xs font-medium text-gray-600 mb-1">Tenant ID (optional)</label>
-              <input
-                type="text"
-                value={credentials.tenantId}
-                onChange={(e) => setCredentials((c) => ({ ...c, tenantId: e.target.value }))}
-                placeholder="Optional"
-                className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
-              />
-            </div>
-            <div className="flex items-end">
-              <Button
-                variant="primary"
-                onClick={handleLoad}
-                loading={loading}
-                disabled={!credentials.username || !credentials.password}
-                className="w-full"
-              >
-                Load Policies
-              </Button>
-            </div>
+        <Card.Body className="space-y-4">
+          <AuthModeSelector mode={authMode} onChange={handleAuthModeChange} />
+          {authMode === 'itglue'
+            ? <ItGlueConnect credentials={credentials} setCredentials={setCredentials} />
+            : <WamConnect />
+          }
+          <div className="flex justify-end">
+            <Button variant="primary" onClick={handleLoad} loading={loading} disabled={!canLoad}>
+              {connected ? 'Reload Policies' : 'Load Policies'}
+            </Button>
           </div>
         </Card.Body>
       </Card>
@@ -270,7 +363,7 @@ export default function ManagePolicies() {
             <svg className="w-12 h-12 mb-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
             </svg>
-            <p className="text-sm">No policies loaded. Enter credentials and click Load Policies.</p>
+            <p className="text-sm">Connect to a tenant above to view its policies.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -296,23 +389,14 @@ export default function ManagePolicies() {
               <tbody className="divide-y divide-gray-50">
                 {loading ? (
                   Array.from({ length: 5 }).map((_, i) => (
-                    <tr key={i}>
-                      {[1,2,3,4,5,6].map((j) => (
-                        <td key={j} className="px-4 py-3">
-                          <div className="h-4 bg-gray-100 rounded animate-pulse" />
-                        </td>
-                      ))}
-                    </tr>
+                    <tr key={i}>{[1,2,3,4,5,6].map((j) => (
+                      <td key={j} className="px-4 py-3"><div className="h-4 bg-gray-100 rounded animate-pulse" /></td>
+                    ))}</tr>
                   ))
                 ) : filtered.map((policy) => (
                   <tr key={policy.Id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedRows.has(policy.Id)}
-                        onChange={() => toggleRow(policy.Id)}
-                        className="h-4 w-4 rounded border-gray-300 text-navy"
-                      />
+                      <input type="checkbox" checked={selectedRows.has(policy.Id)} onChange={() => toggleRow(policy.Id)} className="h-4 w-4 rounded border-gray-300 text-navy" />
                     </td>
                     <td className="px-4 py-3">
                       <div className="font-medium text-gray-900">{policy.DisplayName}</div>
@@ -324,11 +408,7 @@ export default function ManagePolicies() {
                     <td className="px-6 py-3 text-right">
                       <div className="flex justify-end gap-1">
                         <Button size="sm" variant="ghost" onClick={() => handleEdit(policy)}>Edit</Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleToggle(policy)}
-                        >
+                        <Button size="sm" variant="ghost" onClick={() => handleToggle(policy)}>
                           {policy.State === 'enabled' ? 'Disable' : 'Enable'}
                         </Button>
                         <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(policy)}>
@@ -344,7 +424,6 @@ export default function ManagePolicies() {
         )}
       </Card>
 
-      {/* Delete confirm */}
       <Modal
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
@@ -356,20 +435,13 @@ export default function ManagePolicies() {
         loading={deleteLoading}
       >
         <p className="py-2">
-          Are you sure you want to delete <strong>{deleteTarget?.DisplayName}</strong>? This action cannot be undone.
+          Are you sure you want to delete <strong>{deleteTarget?.DisplayName}</strong>? This cannot be undone.
         </p>
       </Modal>
 
-      {/* Edit slide-over */}
-      <SlideOver
-        open={!!editTarget}
-        onClose={() => setEditTarget(null)}
-        title={editTarget ? `Edit: ${editTarget.DisplayName}` : 'Edit Policy'}
-      >
+      <SlideOver open={!!editTarget} onClose={() => setEditTarget(null)} title={editTarget ? `Edit: ${editTarget.DisplayName}` : 'Edit Policy'}>
         <div className="p-6 space-y-4">
-          <p className="text-xs text-gray-500">
-            Edit the policy JSON below and save to apply changes. Only modify fields you intend to change.
-          </p>
+          <p className="text-xs text-gray-500">Edit the policy JSON and save to apply changes.</p>
           <JsonEditor value={editJson} onChange={setEditJson} />
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => setEditTarget(null)}>Cancel</Button>

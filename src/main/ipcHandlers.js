@@ -105,10 +105,15 @@ function registerIpcHandlers(win) {
   ipcMain.handle('itglue:getPasswords', async (_, orgId) => itGlue.getPasswords(orgId))
 
   // Policies
-  ipcMain.handle('policies:list', async (_, credentials) => {
+  ipcMain.handle('policies:list', async (_, credentials, authMode) => {
+    const connectLine = (authMode === 'interactive' || credentials?.interactive)
+      ? `Connect-MgGraph -Scopes "Policy.Read.All" -NoWelcome`
+      : `Connect-MgGraph ${credentials.tenantId ? `-TenantId '${credentials.tenantId}'` : ''} -Credential (New-Object System.Management.Automation.PSCredential('${credentials.username}', (ConvertTo-SecureString '${credentials.password}' -AsPlainText -Force))) -NoWelcome`
+
     const script = `
+$ProgressPreference = 'SilentlyContinue'
 try {
-  Connect-MgGraph -TenantId '${credentials.tenantId || ''}' -Credential (New-Object System.Management.Automation.PSCredential('${credentials.username}', (ConvertTo-SecureString '${credentials.password}' -AsPlainText -Force))) -NoWelcome
+  ${connectLine}
   $policies = Get-MgIdentityConditionalAccessPolicy
   $policies | Select-Object Id, DisplayName, State, CreatedDateTime, ModifiedDateTime | ConvertTo-Json -Depth 3
   Disconnect-MgGraph | Out-Null
