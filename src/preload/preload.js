@@ -36,6 +36,17 @@ contextBridge.exposeInMainWorld('api', {
     toggleState: (id, state) => ipcRenderer.invoke('policies:toggleState', id, state),
   },
 
+  // Templates (file-based when a shared path is configured)
+  templates: {
+    load: () => ipcRenderer.invoke('templates:load'),
+    save: (templates) => ipcRenderer.invoke('templates:save', templates),
+  },
+
+  // Native dialogs
+  dialog: {
+    openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
+  },
+
   // PS event listeners
   onPsOutput: (cb) => {
     const handler = (_, data) => cb(data)

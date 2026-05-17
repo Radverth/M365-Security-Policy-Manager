@@ -1,4 +1,4 @@
-const { ipcMain, app } = require('electron')
+const { ipcMain, app, dialog } = require('electron')
 const { checkPowerShell, runScript } = require('./powershell')
 const { getModuleStatus, installModules, updateModules } = require('./moduleManager')
 const itGlue = require('./itGlue')
@@ -177,6 +177,40 @@ Write-Output "SUCCESS"
     const script = `Update-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId '${id}' -State '${state}'\nWrite-Output "SUCCESS"`
     const { exitCode } = await runScript(script, null, null)
     return { success: exitCode === 0 }
+  })
+
+  // Templates — file-based when a shared path is configured, else electron-store
+  ipcMain.handle('templates:load', async () => {
+    const templatesPath = store.get('templatesPath')
+    if (templatesPath) {
+      const filePath = path.join(templatesPath, 'templates.json')
+      try {
+        if (fs.existsSync(filePath)) {
+          return JSON.parse(fs.readFileSync(filePath, 'utf8'))
+        }
+        return []
+      } catch {
+        return []
+      }
+    }
+    return store.get('templates') || []
+  })
+
+  ipcMain.handle('templates:save', async (_, templates) => {
+    const templatesPath = store.get('templatesPath')
+    if (templatesPath) {
+      const filePath = path.join(templatesPath, 'templates.json')
+      fs.writeFileSync(filePath, JSON.stringify(templates, null, 2), 'utf8')
+    } else {
+      store.set('templates', templates)
+    }
+  })
+
+  // Native folder picker
+  ipcMain.handle('dialog:openFolder', async () => {
+    const result = await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
+    if (result.canceled) return null
+    return result.filePaths[0] || null
   })
 }
 

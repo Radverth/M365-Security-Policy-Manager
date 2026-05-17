@@ -237,6 +237,61 @@ export default function Settings() {
           </Card.Body>
         </Card>
 
+        {/* Templates Storage */}
+        {role === 'admin' && (
+          <Card>
+            <Card.Header>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
+                  <svg className="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                </div>
+                <h2 className="text-sm font-semibold text-gray-900">Templates Storage</h2>
+              </div>
+            </Card.Header>
+            <Card.Body className="space-y-4">
+              <FormGroup
+                label="Shared Templates Folder"
+                hint="Point to a SharePoint-synced folder or network drive so all engineers share the same templates. Leave blank to store templates locally on this machine only."
+              >
+                <div className="flex gap-2">
+                  <TextInput
+                    value={form.templatesPath ?? ''}
+                    onChange={(v) => set('templatesPath', v)}
+                    placeholder="e.g. C:\Users\You\OneDrive\M365Templates"
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="secondary"
+                    onClick={async () => {
+                      if (!window.api?.dialog) return
+                      const folder = await window.api.dialog.openFolder()
+                      if (folder) set('templatesPath', folder)
+                    }}
+                  >
+                    Browse
+                  </Button>
+                  {form.templatesPath && (
+                    <Button variant="ghost" onClick={() => set('templatesPath', '')}>
+                      Clear
+                    </Button>
+                  )}
+                </div>
+              </FormGroup>
+              {form.templatesPath ? (
+                <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700">
+                  Templates will be saved to <span className="font-mono font-medium">{form.templatesPath}\templates.json</span>. Any machine pointing to the same folder will share these templates.
+                </div>
+              ) : (
+                <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+                  Templates are stored locally in the encrypted app store on this machine.
+                </div>
+              )}
+            </Card.Body>
+          </Card>
+        )}
+
         {/* Admin PIN */}
         {role === 'admin' && (
           <Card>
