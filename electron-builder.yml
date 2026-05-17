@@ -38,6 +38,7 @@ linux:
   category: Utility
 
 deb:
+  maintainer: support@yourcompany.com
   depends:
     - libgtk-3-0
     - libnotify4
