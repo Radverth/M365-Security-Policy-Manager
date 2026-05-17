@@ -111,16 +111,14 @@ function EngineerNav() {
   )
 }
 
-function RoleBadge({ role, onSwitch }) {
+function RoleBadge({ onSwitch }) {
   return (
     <button
       onClick={onSwitch}
-      title="Switch role (restarts role selection)"
+      title="Switch role"
       className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 transition-all text-xs"
     >
-      <span className={role === 'admin' ? 'text-gold' : 'text-white/70'}>
-        {role === 'admin' ? '★ Admin' : 'Engineer'}
-      </span>
+      <span className="text-gold">★ Admin</span>
       <svg className="w-3 h-3 text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
       </svg>
@@ -152,7 +150,10 @@ function Sidebar({ modules, psStatus, role, onSwitchRole }) {
           <div className="text-sm font-bold leading-tight text-white">M365 Security</div>
           <div className="text-xs text-gold font-medium">Policy Manager</div>
         </div>
-        <RoleBadge role={role} onSwitch={onSwitchRole} />
+        {role === 'admin' && <RoleBadge onSwitch={onSwitchRole} />}
+        {role === 'engineer' && (
+          <span className="text-xs text-white/50 px-2 py-1">Engineer</span>
+        )}
       </div>
 
       {/* Nav */}
