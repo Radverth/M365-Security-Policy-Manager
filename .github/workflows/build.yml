@@ -3,16 +3,18 @@ name: Build & Release
 on:
   push:
     branches: [main]
-    tags: ['v*.*.*']
-  pull_request:
-    branches: [main]
+    tags-ignore: ['**']  # tags are internal; never re-trigger from them
 
 jobs:
-  bump-and-tag:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'chore: bump version')
+  # ── 1. Bump version, tag, create draft release ─────────────────────────────
+  prepare-release:
+    if: "!contains(github.event.head_commit.message, 'chore: bump version')"
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      release_id: ${{ steps.create-release.outputs.release_id }}
 
     steps:
       - name: Checkout
@@ -26,26 +28,43 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Bump patch version and tag
+      - name: Bump patch version
+        id: bump
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           CURRENT=$(node -p "require('./package.json').version")
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-          PATCH=$((PATCH + 1))
-          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
 
           npm version "$NEW_VERSION" --no-git-tag-version
           git add package.json package-lock.json
-          git commit -m "chore: bump version to v${NEW_VERSION} [skip ci]"
+          git commit -m "chore: bump version to v${NEW_VERSION}"
           git tag "v${NEW_VERSION}"
           git push origin main
           git push origin "v${NEW_VERSION}"
 
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release
+        id: create-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_ID=$(gh release create "v${{ steps.bump.outputs.version }}" \
+            --title "v${{ steps.bump.outputs.version }}" \
+            --generate-notes \
+            --draft \
+            --repo "${{ github.repository }}" \
+            --json id -q '.id')
+          echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
+
+  # ── 2. Build on all platforms ───────────────────────────────────────────────
   build:
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: prepare-release
     strategy:
+      fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
@@ -53,6 +72,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.prepare-release.outputs.version }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -98,10 +119,11 @@ jobs:
           name: linux-appimage
           path: dist/*.AppImage
 
-  release:
-    needs: build
+  # ── 3a. Both builds passed → attach artifacts and publish ──────────────────
+  publish-release:
+    needs: [prepare-release, build]
+    if: success()
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
 
@@ -109,14 +131,33 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            windows-installer/*.exe
-            linux-appimage/*.AppImage
-          generate_release_notes: true
-          draft: false
-          prerelease: false
+      - name: Upload artifacts and publish release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "v${{ needs.prepare-release.outputs.version }}" \
+            windows-installer/*.exe \
+            linux-appimage/*.AppImage \
+            --repo "${{ github.repository }}"
+
+          gh release edit "v${{ needs.prepare-release.outputs.version }}" \
+            --draft=false \
+            --repo "${{ github.repository }}"
+
+  # ── 3b. Any build failed → delete the draft release ────────────────────────
+  cleanup-release:
+    needs: [prepare-release, build]
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Delete draft release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete "v${{ needs.prepare-release.outputs.version }}" \
+            --yes \
+            --repo "${{ github.repository }}"
+          echo "Draft release v${{ needs.prepare-release.outputs.version }} deleted due to build failure."
