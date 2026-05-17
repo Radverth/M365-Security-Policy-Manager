@@ -306,10 +306,43 @@ const PRESETS = [
   },
 ]
 
+const CATEGORY_META = {
+  'Conditional Access':   { color: 'border-purple-200 bg-purple-50',  ring: 'ring-purple-400',  badge: 'bg-purple-100 text-purple-700',  dot: 'bg-purple-500',  icon: (
+    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" /></svg>
+  ) },
+  'Identity Protection':  { color: 'border-indigo-200 bg-indigo-50',  ring: 'ring-indigo-400',  badge: 'bg-indigo-100 text-indigo-700',  dot: 'bg-indigo-500',  icon: (
+    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" /></svg>
+  ) },
+  'Exchange Online':      { color: 'border-blue-200 bg-blue-50',      ring: 'ring-blue-400',    badge: 'bg-blue-100 text-blue-700',    dot: 'bg-blue-500',    icon: (
+    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>
+  ) },
+  'SharePoint & OneDrive':{ color: 'border-sky-200 bg-sky-50',        ring: 'ring-sky-400',     badge: 'bg-sky-100 text-sky-700',     dot: 'bg-sky-500',     icon: (
+    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" /></svg>
+  ) },
+  'Teams':                { color: 'border-teal-200 bg-teal-50',      ring: 'ring-teal-400',    badge: 'bg-teal-100 text-teal-700',    dot: 'bg-teal-500',    icon: (
+    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}><path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" /></svg>
+  ) },
+  'Intune / Endpoint':    { color: 'border-green-200 bg-green-50',    ring: 'ring-green-400',   badge: 'bg-green-100 text-green-700',   dot: 'bg-green-500',   icon: (
+    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}><path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0H3" /></svg>
+  ) },
+  'Defender':             { color: 'border-red-200 bg-red-50',        ring: 'ring-red-400',     badge: 'bg-red-100 text-red-700',     dot: 'bg-red-500',     icon: (
+    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0-10.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.25-8.25-3.286zm0 13.036h.008v.008H12v-.008z" /></svg>
+  ) },
+  'Audit & Compliance':   { color: 'border-amber-200 bg-amber-50',    ring: 'ring-amber-400',   badge: 'bg-amber-100 text-amber-700',   dot: 'bg-amber-500',   icon: (
+    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" /></svg>
+  ) },
+  'Admin Security':       { color: 'border-orange-200 bg-orange-50',  ring: 'ring-orange-400',  badge: 'bg-orange-100 text-orange-700',  dot: 'bg-orange-500',  icon: (
+    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" /></svg>
+  ) },
+  'Tenant Baseline':      { color: 'border-gray-300 bg-gray-50',      ring: 'ring-gray-400',    badge: 'bg-gray-100 text-gray-700',    dot: 'bg-gray-500',    icon: (
+    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
+  ) },
+}
+
 function PresetPicker({ onSelect }) {
   return (
     <div className="space-y-4">
-      <p className="text-sm text-gray-600">Choose a starting point — you can fine-tune individual policies in the next step.</p>
+      <p className="text-sm text-gray-600">Choose a starting point — you can fine-tune individual policies after.</p>
       <div className="grid grid-cols-2 gap-3">
         {PRESETS.map((preset) => {
           const count = preset.getIds().length
@@ -338,131 +371,200 @@ function PresetPicker({ onSelect }) {
   )
 }
 
-function CategoryRow({ category, policies, selected, onToggleAll, onTogglePolicy }) {
-  const [open, setOpen] = useState(false)
+// Category cards grid — top-level view after preset is chosen
+function CategoryGrid({ selected, onDrillIn, onToggleAll, onChangePreset }) {
+  const totalSelected = selected.length
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-gray-600"><strong className="text-gray-900">{totalSelected}</strong> policies selected — click a category to adjust</span>
+        <div className="flex items-center gap-2 text-xs">
+          <button onClick={onChangePreset} className="text-navy hover:underline">Change preset</button>
+          <span className="text-gray-300">|</span>
+          <button onClick={() => onToggleAll(true)} className="text-gray-500 hover:text-gray-700 hover:underline">All</button>
+          <button onClick={() => onToggleAll(false)} className="text-gray-500 hover:text-gray-700 hover:underline">None</button>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {Object.entries(POLICIES_BY_CATEGORY).map(([cat, policies]) => {
+          const meta = CATEGORY_META[cat] || { color: 'border-gray-200 bg-gray-50', badge: 'bg-gray-100 text-gray-700', dot: 'bg-gray-400', icon: null }
+          const catIds = policies.map((p) => p.id)
+          const selCount = catIds.filter((id) => selected.includes(id)).length
+          const allSel = selCount === catIds.length
+          const noneSel = selCount === 0
+
+          return (
+            <button
+              key={cat}
+              onClick={() => onDrillIn(cat)}
+              className={`text-left rounded-xl border-2 p-4 hover:shadow-md transition-all ${meta.color} group`}
+            >
+              <div className="flex items-start justify-between gap-2 mb-3">
+                <div className={`text-gray-500 group-hover:scale-110 transition-transform`}>{meta.icon}</div>
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                  allSel ? 'bg-green-100 text-green-700' : noneSel ? 'bg-gray-200 text-gray-500' : meta.badge
+                }`}>
+                  {selCount}/{catIds.length}
+                </span>
+              </div>
+              <p className="text-sm font-semibold text-gray-800 leading-tight mb-1">{cat}</p>
+              <div className="flex items-center gap-1 mt-2">
+                {catIds.slice(0, 10).map((id, i) => (
+                  <span key={id} className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${selected.includes(id) ? meta.dot : 'bg-gray-200'}`} />
+                ))}
+                {catIds.length > 10 && <span className="text-xs text-gray-400 ml-0.5">+{catIds.length - 10}</span>}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// Drill-in view — single category policy list
+function CategoryDetail({ category, policies, selected, onTogglePolicy, onToggleAll, onBack }) {
+  const [search, setSearch] = useState('')
+  const meta = CATEGORY_META[category] || { color: 'border-gray-200', badge: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400', icon: null }
   const catIds = policies.map((p) => p.id)
   const selCount = catIds.filter((id) => selected.includes(id)).length
   const allSel = selCount === catIds.length
   const someSel = selCount > 0 && !allSel
+  const noneSel = selCount === 0
+
+  const filtered = policies.filter((p) =>
+    !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.id.toLowerCase().includes(search.toLowerCase())
+  )
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden">
-      <div className="flex items-center gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <input
-          type="checkbox"
-          checked={allSel}
-          ref={(el) => { if (el) el.indeterminate = someSel }}
-          onChange={() => onToggleAll(catIds, allSel)}
-          onClick={(e) => e.stopPropagation()}
-          className="h-4 w-4 rounded border-gray-300 text-navy flex-shrink-0"
-        />
-        <span className="text-sm font-semibold text-gray-700 flex-1">{category}</span>
-        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${selCount > 0 ? 'bg-navy text-white' : 'bg-gray-200 text-gray-600'}`}>
-          {selCount}/{catIds.length}
-        </span>
-        <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
+    <div className="space-y-3">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <button onClick={onBack} className="flex items-center gap-1 text-xs text-navy hover:underline flex-shrink-0">
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          All categories
+        </button>
+        <div className="flex-1 flex items-center justify-between min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-gray-800 truncate">{category}</span>
+            <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${meta.badge}`}>{selCount}/{catIds.length} selected</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              onClick={() => onToggleAll(catIds, noneSel)}
+              className="text-navy hover:underline"
+            >
+              {noneSel ? 'Select all' : 'Deselect all'}
+            </button>
+          </div>
+        </div>
       </div>
-      {open && (
-        <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
-          {policies.map((p) => (
-            <label key={p.id} className="flex items-start gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={selected.includes(p.id)}
-                onChange={() => onTogglePolicy(p.id)}
-                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-navy flex-shrink-0"
-              />
+
+      {/* Search */}
+      <input
+        type="text"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder={`Search ${category} policies...`}
+        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
+        autoFocus
+      />
+
+      {/* Policy list */}
+      <div className="space-y-1.5 max-h-[360px] overflow-y-auto pr-1">
+        {filtered.map((p) => {
+          const isSelected = selected.includes(p.id)
+          return (
+            <button
+              key={p.id}
+              onClick={() => onTogglePolicy(p.id)}
+              className={[
+                'w-full text-left flex items-start gap-3 px-3 py-2.5 rounded-lg border transition-all',
+                isSelected
+                  ? 'border-navy bg-navy-50'
+                  : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50',
+              ].join(' ')}
+            >
+              <div className={`mt-0.5 w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-colors ${
+                isSelected ? 'bg-navy border-navy' : 'border-gray-300 bg-white'
+              }`}>
+                {isSelected && (
+                  <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+              </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs font-mono text-gray-400 flex-shrink-0">{p.id}</span>
-                  <span className="text-sm text-gray-800 truncate">{p.name}</span>
+                  <span className={`text-sm font-medium ${isSelected ? 'text-navy' : 'text-gray-800'}`}>{p.name}</span>
                   {severityBadge(p.severity)}
                 </div>
-                {p.description && <p className="text-xs text-gray-400 mt-0.5 truncate">{p.description}</p>}
+                {p.description && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{p.description}</p>}
               </div>
-            </label>
-          ))}
-        </div>
-      )}
+            </button>
+          )
+        })}
+        {filtered.length === 0 && (
+          <p className="text-center text-sm text-gray-400 py-6">No policies match "{search}"</p>
+        )}
+      </div>
     </div>
   )
 }
 
 function StepSelectPolicies({ selected, setSelected }) {
-  const [preset, setPreset] = useState(null) // null = not chosen yet
-  const [search, setSearch] = useState('')
+  const [preset, setPreset] = useState(null)
+  const [drillCategory, setDrillCategory] = useState(null)
 
   function handlePresetSelect(p) {
-    if (p === null) {
-      setSelected([])
-    } else {
-      setSelected(p.getIds())
-    }
+    setSelected(p === null ? [] : p.getIds())
     setPreset(p ?? { id: 'custom', name: 'Custom' })
+    setDrillCategory(null)
   }
 
   function togglePolicy(id) {
     setSelected((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id])
   }
 
-  function toggleAll(catIds, allSel) {
-    setSelected((s) => allSel ? s.filter((id) => !catIds.includes(id)) : [...new Set([...s, ...catIds])])
+  function toggleAll(catIds, makeSelected) {
+    if (typeof makeSelected === 'boolean') {
+      setSelected((s) => makeSelected ? [...new Set([...s, ...catIds])] : s.filter((id) => !catIds.includes(id)))
+    } else {
+      // catIds is actually a boolean (global toggle from CategoryGrid)
+      const all = catIds
+      setSelected(all ? POLICIES.map((p) => p.id) : [])
+    }
   }
-
-  const filteredCategories = Object.keys(POLICIES_BY_CATEGORY).reduce((acc, cat) => {
-    const policies = POLICIES_BY_CATEGORY[cat].filter((p) =>
-      !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.id.toLowerCase().includes(search.toLowerCase())
-    )
-    if (policies.length > 0) acc[cat] = policies
-    return acc
-  }, {})
 
   if (!preset) {
     return <PresetPicker onSelect={handlePresetSelect} />
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search policies..."
-            className="rounded border border-gray-300 px-3 py-1.5 text-sm w-52 focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
-          />
-          <span className="text-sm text-gray-500">{selected.length} selected</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setPreset(null)} className="text-xs text-navy hover:underline">
-            Change preset
-          </button>
-          <span className="text-gray-300">|</span>
-          <button onClick={() => setSelected(POLICIES.filter((p) => p.defaultEnabled).map((p) => p.id))} className="text-xs text-gray-500 hover:text-gray-700 hover:underline">Defaults</button>
-          <button onClick={() => setSelected(POLICIES.map((p) => p.id))} className="text-xs text-gray-500 hover:text-gray-700 hover:underline">All</button>
-          <button onClick={() => setSelected([])} className="text-xs text-gray-500 hover:text-gray-700 hover:underline">None</button>
-        </div>
-      </div>
+  if (drillCategory) {
+    return (
+      <CategoryDetail
+        category={drillCategory}
+        policies={POLICIES_BY_CATEGORY[drillCategory] || []}
+        selected={selected}
+        onTogglePolicy={togglePolicy}
+        onToggleAll={(catIds, makeSelected) => {
+          setSelected((s) => makeSelected ? [...new Set([...s, ...catIds])] : s.filter((id) => !catIds.includes(id)))
+        }}
+        onBack={() => setDrillCategory(null)}
+      />
+    )
+  }
 
-      <div className="max-h-[420px] overflow-y-auto space-y-2 pr-1">
-        {Object.entries(filteredCategories).map(([cat, policies]) => (
-          <CategoryRow
-            key={cat}
-            category={cat}
-            policies={policies}
-            selected={selected}
-            onToggleAll={toggleAll}
-            onTogglePolicy={togglePolicy}
-          />
-        ))}
-      </div>
-    </div>
+  return (
+    <CategoryGrid
+      selected={selected}
+      onDrillIn={setDrillCategory}
+      onToggleAll={(all) => setSelected(all ? POLICIES.map((p) => p.id) : [])}
+      onChangePreset={() => { setPreset(null); setDrillCategory(null) }}
+    />
   )
 }
 
