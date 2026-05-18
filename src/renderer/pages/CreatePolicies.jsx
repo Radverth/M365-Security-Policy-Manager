@@ -685,13 +685,30 @@ function StepDeploy({ logs, results, selectedIds, running }) {
 // ── Main wizard ───────────────────────────────────────────────────────────────
 export default function CreatePolicies() {
   const { settings, addNotification } = useStore()
+
+  // Pick up baseline pre-selection if navigated from Baselines page
+  const baselinePolicyIds = (() => {
+    try {
+      const raw = sessionStorage.getItem('baseline-policyIds')
+      if (raw) { sessionStorage.removeItem('baseline-policyIds'); return JSON.parse(raw) }
+    } catch {}
+    return null
+  })()
+  const baselineName = (() => {
+    const n = sessionStorage.getItem('baseline-name')
+    if (n) sessionStorage.removeItem('baseline-name')
+    return n
+  })()
+
   const [authMode, setAuthMode] = useState('itglue')
   const [step, setStep] = useState(1)
   const [org, setOrg] = useState(null)
   const [credentials, setCredentials] = useState(null)
   const [usePrefix, setUsePrefix] = useState(!!settings.defaultPolicyPrefix)
   const [prefix, setPrefix] = useState(settings.defaultPolicyPrefix || '')
-  const [selectedIds, setSelectedIds] = useState(POLICIES.filter((p) => p.defaultEnabled).map((p) => p.id))
+  const [selectedIds, setSelectedIds] = useState(
+    baselinePolicyIds ?? POLICIES.filter((p) => p.defaultEnabled).map((p) => p.id)
+  )
   const [policyConfigs, setPolicyConfigs] = useState({})
   const [deployLogs, setDeployLogs] = useState([])
   const [deployResults, setDeployResults] = useState({})
@@ -768,6 +785,14 @@ export default function CreatePolicies() {
         <p className="mt-1 text-sm text-gray-500">Deploy M365 security policies to a tenant in {STEPS.length} steps</p>
       </div>
 
+      {baselineName && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-lg bg-purple-50 border border-purple-200 text-sm text-purple-800">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+          </svg>
+          <span>Policies pre-selected from <strong>{baselineName}</strong> baseline — you can adjust in step 3.</span>
+        </div>
+      )}
       <AuthModeBanner mode={authMode} onChange={handleAuthModeChange} locked={step > 1} />
 
       <div className="mb-6">
