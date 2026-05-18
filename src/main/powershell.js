@@ -9,16 +9,16 @@ function getPwshPath() {
   if (configured && fs.existsSync(configured)) return configured
 
   if (process.platform === 'win32') {
-    const candidates = [
-      'pwsh.exe',
+    // Check well-known absolute paths first (avoids PATH lookup failures in packaged Electron)
+    const absoluteCandidates = [
       'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      'C:\\Program Files\\PowerShell\\7-preview\\pwsh.exe',
       'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
     ]
-    for (const c of candidates) {
-      try {
-        if (c === 'pwsh.exe' || fs.existsSync(c)) return c
-      } catch {}
+    for (const c of absoluteCandidates) {
+      try { if (fs.existsSync(c)) return c } catch {}
     }
+    // Fall back to PATH-based names (works when the app inherits a full user PATH)
     return 'pwsh.exe'
   }
 
@@ -37,10 +37,32 @@ function checkPowerShell() {
     let output = ''
     proc.stdout.on('data', (d) => { output += d.toString() })
     proc.on('close', (code) => {
-      resolve({ found: code === 0, path: pwsh, version: output.trim() })
+      if (code === 0) {
+        resolve({ found: true, path: pwsh, version: output.trim() })
+      } else if (process.platform === 'win32' && pwsh !== 'powershell.exe') {
+        // pwsh.exe found but exited non-zero — try Windows PowerShell 5 fallback
+        const fallback = 'powershell.exe'
+        const fb = spawn(fallback, ['-Command', '$PSVersionTable.PSVersion.ToString()'], { stdio: 'pipe' })
+        let fbOut = ''
+        fb.stdout.on('data', (d) => { fbOut += d.toString() })
+        fb.on('close', (c2) => resolve({ found: c2 === 0, path: fallback, version: fbOut.trim() }))
+        fb.on('error', () => resolve({ found: false, path: pwsh, version: '' }))
+      } else {
+        resolve({ found: false, path: pwsh, version: '' })
+      }
     })
     proc.on('error', () => {
-      resolve({ found: false, path: pwsh, version: '' })
+      if (process.platform === 'win32') {
+        // pwsh.exe not found — try Windows PowerShell 5
+        const fallback = 'powershell.exe'
+        const fb = spawn(fallback, ['-Command', '$PSVersionTable.PSVersion.ToString()'], { stdio: 'pipe' })
+        let fbOut = ''
+        fb.stdout.on('data', (d) => { fbOut += d.toString() })
+        fb.on('close', (c2) => resolve({ found: c2 === 0, path: fallback, version: fbOut.trim() }))
+        fb.on('error', () => resolve({ found: false, path: pwsh, version: '' }))
+      } else {
+        resolve({ found: false, path: pwsh, version: '' })
+      }
     })
   })
 }

@@ -5,7 +5,6 @@ const REQUIRED_MODULES = [
   { name: 'Microsoft.Graph.Identity.SignIns', description: 'Conditional Access policy management' },
   { name: 'Microsoft.Graph.DeviceManagement', description: 'Intune / device compliance policies' },
   { name: 'ExchangeOnlineManagement', description: 'Exchange Online policies' },
-  { name: 'AzureAD', description: 'Azure AD tenant management' },
 ]
 
 async function getModuleStatus(win) {
@@ -78,27 +77,32 @@ $InformationPreference = 'SilentlyContinue'
 `
 
 const BOOTSTRAP = `
-# Windows-only: TLS 1.2 + NuGet package provider
-# (Linux/macOS PS7 uses .NET Core which handles TLS natively and does not use NuGet provider)
-if ($IsWindows) {
+$psEdition = $PSVersionTable.PSEdition  # 'Desktop' = WinPS5, 'Core' = PS7+
+Write-Output "SETUP: PowerShell $($PSVersionTable.PSVersion) ($psEdition)"
+
+if ($IsWindows -and $psEdition -eq 'Desktop') {
+    # Windows PowerShell 5 only — needs NuGet provider + TLS 1.2 bootstrap
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     } catch {}
     try {
-        $nuget = Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue | Sort-Object Version -Descending | Select-Object -First 1
+        $nuget = Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue |
+                 Sort-Object Version -Descending | Select-Object -First 1
         if (-not $nuget -or [version]$nuget.Version -lt [version]'2.8.5.201') {
-            Write-Output "SETUP: Installing NuGet provider..."
-            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser
+            Write-Output "SETUP: Installing NuGet provider (required for PowerShell 5)..."
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser -ErrorAction Stop
+            Import-PackageProvider -Name NuGet -Force -ErrorAction SilentlyContinue
             Write-Output "SETUP: NuGet provider ready"
         }
+        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
     } catch {
         Write-Output "WARNING: NuGet bootstrap - $($_.Exception.Message)"
     }
-    try {
-        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
-    } catch {}
+} else {
+    # PowerShell 7+ (Windows/Linux/macOS) — NuGet provider not required.
+    # Just mark PSGallery as trusted (local config, no network call).
+    try { Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue } catch {}
 }
-# -Force on Install-Module handles the PSGallery trust bypass on Linux/macOS
 `
 
 async function installModules(moduleNames, onData, onError) {
@@ -109,9 +113,9 @@ ${BOOTSTRAP}
 Write-Output "SETUP: Package source ready"
 $modules = @(${moduleNames.map(n => `'${n}'`).join(',')})
 foreach ($mod in $modules) {
-    Write-Output "INSTALLING: $mod (this may take several minutes for large modules)..."
+    Write-Output "INSTALLING: $mod (large modules like Microsoft.Graph may take 5-15 minutes)..."
     try {
-        Install-Module -Name $mod -Scope CurrentUser -Force -AllowClobber -AcceptLicense -SkipPublisherCheck -Repository PSGallery -ErrorAction Stop
+        Install-Module -Name $mod -Scope CurrentUser -Force -AllowClobber -AcceptLicense -SkipPublisherCheck -Confirm:$false -Repository PSGallery -ErrorAction Stop
         Write-Output "SUCCESS: $mod installed"
     } catch {
         Write-Output "ERROR: $mod - $($_.Exception.Message)"
@@ -130,9 +134,9 @@ ${BOOTSTRAP}
 Write-Output "SETUP: Package source ready"
 $modules = @(${moduleNames.map(n => `'${n}'`).join(',')})
 foreach ($mod in $modules) {
-    Write-Output "UPDATING: $mod (this may take several minutes)..."
+    Write-Output "UPDATING: $mod (large modules may take 5-15 minutes)..."
     try {
-        Update-Module -Name $mod -Force -AcceptLicense -ErrorAction Stop
+        Update-Module -Name $mod -Force -AcceptLicense -Confirm:$false -ErrorAction Stop
         Write-Output "SUCCESS: $mod updated"
     } catch {
         Write-Output "ERROR: $mod - $($_.Exception.Message)"
