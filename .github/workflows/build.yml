@@ -106,7 +106,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: dist-electron/*.exe
+          path: |
+            dist-electron/*.exe
+            dist-electron/latest.yml
 
       - name: Upload Linux artifact
         if: runner.os == 'Linux'
@@ -116,6 +118,7 @@ jobs:
           path: |
             dist-electron/*.deb
             dist-electron/*.AppImage
+            dist-electron/latest-linux.yml
 
   # ── 3a. Both builds passed → attach artifacts and publish ──────────────────
   publish-release:
@@ -135,8 +138,10 @@ jobs:
         run: |
           gh release upload "v${{ needs.prepare-release.outputs.version }}" \
             windows-installer/*.exe \
+            windows-installer/latest.yml \
             linux-packages/*.deb \
             linux-packages/*.AppImage \
+            linux-packages/latest-linux.yml \
             --repo "${{ github.repository }}"
 
           gh release edit "v${{ needs.prepare-release.outputs.version }}" \
