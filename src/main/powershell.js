@@ -81,7 +81,7 @@ function runScript(script, onData, onError) {
     )
 
     // Force line-by-line stdout flushing so the Node data events fire in real time
-    const fullScript = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n[Console]::Out.AutoFlush = $true\n${script}`
+    const fullScript = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\ntry { ([System.IO.StreamWriter][Console]::Out).AutoFlush = $true } catch {}\n${script}`
 
     try {
       fs.writeFileSync(tmpFile, fullScript, 'utf8')

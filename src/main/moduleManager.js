@@ -77,10 +77,10 @@ $InformationPreference = 'SilentlyContinue'
 `
 
 const BOOTSTRAP = `
-$psEdition = $PSVersionTable.PSEdition  # 'Desktop' = WinPS5, 'Core' = PS7+
-Write-Output "SETUP: PowerShell $($PSVersionTable.PSVersion) ($psEdition)"
+$psEd = $PSVersionTable.PSEdition  # 'Desktop' = WinPS5, 'Core' = PS7+
+Write-Output "SETUP: PowerShell $($PSVersionTable.PSVersion) ($psEd)"
 
-if ($IsWindows -and $psEdition -eq 'Desktop') {
+if ($IsWindows -and $psEd -eq 'Desktop') {
     # Windows PowerShell 5 only — needs NuGet provider + TLS 1.2 bootstrap
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
