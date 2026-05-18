@@ -281,7 +281,7 @@ export default function Modules() {
 
       {/* Log panel */}
       {(logs.length > 0 || operationRunning || installingPs) && (
-        <LogPanel logs={logs} height="h-56" title="Installation Output" />
+        <LogPanel logs={logs} height="h-56" title="Installation Output" active={operationRunning || installingPs} />
       )}
     </div>
   )
