@@ -50,13 +50,14 @@ function needsIpps(p) { return IPPS_IDS.has(p.id) }
 
 // ─── Connection builders ──────────────────────────────────────────────────────
 
-function buildConnectGraph(credentials, authMode) {
+function buildConnectGraph(credentials, authMode, opts = {}) {
   const scopes = '"Policy.ReadWrite.ConditionalAccess Policy.Read.All DeviceManagementConfiguration.ReadWrite.All Organization.ReadWrite.All Directory.ReadWrite.All RoleManagement.ReadWrite.Directory AuditLog.Read.All"'
   if (authMode === 'interactive') {
     const tid = credentials?.tenantId ? `-TenantId '${safe(credentials.tenantId)}'` : ''
+    const deviceFlag = opts.useDeviceCode ? '-UseDeviceAuthentication' : ''
     return `Write-Output "CONNECTING: Microsoft Graph (interactive)..."
 try {
-    Connect-MgGraph ${tid} -Scopes ${scopes} -NoWelcome
+    Connect-MgGraph ${tid} ${deviceFlag} -Scopes ${scopes} -NoWelcome
     Write-Output "CONNECTED: Microsoft Graph"
 } catch {
     Write-Output "ERROR: Graph connect failed - $($_.Exception.Message)"; exit 1
@@ -859,14 +860,14 @@ function buildModuleImports(graph, exo, ipps) {
   return lines.join('\n')
 }
 
-function buildScript(policies, credentials, prefix, authMode = 'interactive', policyConfigs = {}) {
+function buildScript(policies, credentials, prefix, authMode = 'interactive', policyConfigs = {}, opts = {}) {
   const hasGraph = policies.some(p => !needsExo(p))
   const hasExo   = policies.some(p => needsExo(p))
   const hasIpps  = policies.some(p => needsIpps(p))
 
   const parts = [PS_PREFS, '', buildModuleImports(hasGraph, hasExo, hasIpps), '']
 
-  if (hasGraph) parts.push(buildConnectGraph(credentials, authMode))
+  if (hasGraph) parts.push(buildConnectGraph(credentials, authMode, opts))
   if (hasExo)   parts.push(buildConnectExo(credentials))
   if (hasIpps)  parts.push(buildConnectIpps(credentials))
 

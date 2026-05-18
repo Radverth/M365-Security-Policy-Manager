@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import useStore from '../store'
 import { POLICIES, POLICIES_BY_CATEGORY } from '../../shared/constants'
 import ProgressStep from '../components/ProgressStep'
@@ -63,9 +63,9 @@ function AuthModeBanner({ mode, onChange, locked }) {
 }
 
 // ── Step 1: Org & Credentials (content varies by auth mode) ──────────────────
-function StepOrgAndCredentials({ authMode, org, setOrg, credentials, setCredentials }) {
+function StepOrgAndCredentials({ authMode, org, setOrg, credentials, setCredentials, useDeviceCode, setUseDeviceCode }) {
   if (authMode === 'itglue') return <StepItGlue org={org} setOrg={setOrg} credentials={credentials} setCredentials={setCredentials} />
-  if (authMode === 'interactive') return <StepInteractive org={org} setOrg={setOrg} setCredentials={setCredentials} />
+  if (authMode === 'interactive') return <StepInteractive org={org} setOrg={setOrg} setCredentials={setCredentials} useDeviceCode={useDeviceCode} setUseDeviceCode={setUseDeviceCode} />
   return null
 }
 
@@ -161,7 +161,7 @@ function StepItGlue({ org, setOrg, credentials, setCredentials }) {
   )
 }
 
-function StepInteractive({ org, setOrg, setCredentials }) {
+function StepInteractive({ org, setOrg, setCredentials, useDeviceCode, setUseDeviceCode }) {
   useEffect(() => {
     // Signal interactive auth — no password needed
     setCredentials({ interactive: true, username: '', password: '', tenantId: '' })
@@ -178,6 +178,24 @@ function StepInteractive({ org, setOrg, setCredentials }) {
           placeholder="e.g. AffinityIT"
           className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
         />
+      </div>
+
+      <div className="flex items-start gap-3 p-4 border border-gray-200 rounded-lg">
+        <input
+          id="device-code"
+          type="checkbox"
+          checked={useDeviceCode}
+          onChange={(e) => setUseDeviceCode(e.target.checked)}
+          className="mt-0.5 h-4 w-4 rounded border-gray-300 text-navy focus:ring-navy cursor-pointer"
+        />
+        <div>
+          <label htmlFor="device-code" className="text-sm font-medium text-gray-700 cursor-pointer">
+            Use device code (no browser popup)
+          </label>
+          <p className="text-xs text-gray-500 mt-0.5">
+            A code appears in the log — open any browser you choose (incognito/private) at <code className="font-mono bg-gray-100 px-1 rounded">aka.ms/devicelogin</code>.
+          </p>
+        </div>
       </div>
 
       <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-2">
@@ -255,56 +273,6 @@ function StepConfigurePrefix({ usePrefix, setUsePrefix, prefix, setPrefix, defau
 }
 
 // ── Step 3: Select Policies ───────────────────────────────────────────────────
-const PRESETS = [
-  {
-    id: 'recommended',
-    name: 'Recommended Baseline',
-    subtitle: 'Best starting point for most tenants',
-    color: 'border-navy bg-navy-50',
-    badge: 'bg-navy text-white',
-    getIds: () => POLICIES.filter((p) => p.defaultEnabled).map((p) => p.id),
-  },
-  {
-    id: 'identity',
-    name: 'Identity & Access',
-    subtitle: 'Conditional Access · Identity Protection · Admin Security · Tenant Baseline',
-    color: 'border-purple-300 bg-purple-50',
-    badge: 'bg-purple-600 text-white',
-    getIds: () => POLICIES.filter((p) => ['Conditional Access', 'Identity Protection', 'Admin Security', 'Tenant Baseline'].includes(p.category)).map((p) => p.id),
-  },
-  {
-    id: 'email',
-    name: 'Email & Collaboration',
-    subtitle: 'Exchange Online · SharePoint & OneDrive · Teams',
-    color: 'border-blue-300 bg-blue-50',
-    badge: 'bg-blue-600 text-white',
-    getIds: () => POLICIES.filter((p) => ['Exchange Online', 'SharePoint & OneDrive', 'Teams'].includes(p.category)).map((p) => p.id),
-  },
-  {
-    id: 'endpoint',
-    name: 'Endpoint & Defender',
-    subtitle: 'Intune device compliance · Defender for Endpoint',
-    color: 'border-green-300 bg-green-50',
-    badge: 'bg-green-600 text-white',
-    getIds: () => POLICIES.filter((p) => ['Intune / Endpoint', 'Defender'].includes(p.category)).map((p) => p.id),
-  },
-  {
-    id: 'compliance',
-    name: 'Audit & Compliance',
-    subtitle: 'Audit logs · DLP · Sensitivity labels · Retention',
-    color: 'border-amber-300 bg-amber-50',
-    badge: 'bg-amber-600 text-white',
-    getIds: () => POLICIES.filter((p) => p.category === 'Audit & Compliance').map((p) => p.id),
-  },
-  {
-    id: 'full',
-    name: 'Full Suite',
-    subtitle: 'All policies — maximum coverage',
-    color: 'border-gray-400 bg-gray-50',
-    badge: 'bg-gray-700 text-white',
-    getIds: () => POLICIES.map((p) => p.id),
-  },
-]
 
 const CATEGORY_META = {
   'Conditional Access':   { color: 'border-purple-200 bg-purple-50',  ring: 'ring-purple-400',  badge: 'bg-purple-100 text-purple-700',  dot: 'bg-purple-500',  icon: (
@@ -339,235 +307,168 @@ const CATEGORY_META = {
   ) },
 }
 
-function PresetPicker({ onSelect }) {
+function PolicyRow({ p, isSelected, onToggle }) {
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-gray-600">Choose a starting point — you can fine-tune individual policies after.</p>
-      <div className="grid grid-cols-2 gap-3">
-        {PRESETS.map((preset) => {
-          const count = preset.getIds().length
-          return (
-            <button
-              key={preset.id}
-              onClick={() => onSelect(preset)}
-              className={`text-left rounded-xl border-2 px-4 py-4 hover:shadow-sm transition-all ${preset.color}`}
-            >
-              <div className="flex items-start justify-between gap-2 mb-1">
-                <span className="text-sm font-semibold text-gray-900">{preset.name}</span>
-                <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${preset.badge}`}>{count}</span>
-              </div>
-              <p className="text-xs text-gray-500 leading-snug">{preset.subtitle}</p>
-            </button>
-          )
-        })}
-      </div>
-      <button
-        onClick={() => onSelect(null)}
-        className="w-full text-left rounded-xl border-2 border-dashed border-gray-300 px-4 py-3 hover:border-gray-400 hover:bg-gray-50 transition-all"
-      >
-        <span className="text-sm font-medium text-gray-600">Custom — start with nothing and pick manually</span>
-      </button>
-    </div>
-  )
-}
-
-// Category cards grid — top-level view after preset is chosen
-function CategoryGrid({ selected, onDrillIn, onToggleAll, onChangePreset }) {
-  const totalSelected = selected.length
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <span className="text-sm text-gray-600"><strong className="text-gray-900">{totalSelected}</strong> policies selected — click a category to adjust</span>
-        <div className="flex items-center gap-2 text-xs">
-          <button onClick={onChangePreset} className="text-navy hover:underline">Change preset</button>
-          <span className="text-gray-300">|</span>
-          <button onClick={() => onToggleAll(true)} className="text-gray-500 hover:text-gray-700 hover:underline">All</button>
-          <button onClick={() => onToggleAll(false)} className="text-gray-500 hover:text-gray-700 hover:underline">None</button>
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        {Object.entries(POLICIES_BY_CATEGORY).map(([cat, policies]) => {
-          const meta = CATEGORY_META[cat] || { color: 'border-gray-200 bg-gray-50', badge: 'bg-gray-100 text-gray-700', dot: 'bg-gray-400', icon: null }
-          const catIds = policies.map((p) => p.id)
-          const selCount = catIds.filter((id) => selected.includes(id)).length
-          const allSel = selCount === catIds.length
-          const noneSel = selCount === 0
-
-          return (
-            <button
-              key={cat}
-              onClick={() => onDrillIn(cat)}
-              className={`text-left rounded-xl border-2 p-4 hover:shadow-md transition-all ${meta.color} group`}
-            >
-              <div className="flex items-start justify-between gap-2 mb-3">
-                <div className={`text-gray-500 group-hover:scale-110 transition-transform`}>{meta.icon}</div>
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${
-                  allSel ? 'bg-green-100 text-green-700' : noneSel ? 'bg-gray-200 text-gray-500' : meta.badge
-                }`}>
-                  {selCount}/{catIds.length}
-                </span>
-              </div>
-              <p className="text-sm font-semibold text-gray-800 leading-tight mb-1">{cat}</p>
-              <div className="flex items-center gap-1 mt-2">
-                {catIds.slice(0, 10).map((id, i) => (
-                  <span key={id} className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${selected.includes(id) ? meta.dot : 'bg-gray-200'}`} />
-                ))}
-                {catIds.length > 10 && <span className="text-xs text-gray-400 ml-0.5">+{catIds.length - 10}</span>}
-              </div>
-            </button>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-// Drill-in view — single category policy list
-function CategoryDetail({ category, policies, selected, onTogglePolicy, onToggleAll, onBack }) {
-  const [search, setSearch] = useState('')
-  const meta = CATEGORY_META[category] || { color: 'border-gray-200', badge: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400', icon: null }
-  const catIds = policies.map((p) => p.id)
-  const selCount = catIds.filter((id) => selected.includes(id)).length
-  const allSel = selCount === catIds.length
-  const someSel = selCount > 0 && !allSel
-  const noneSel = selCount === 0
-
-  const filtered = policies.filter((p) =>
-    !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.id.toLowerCase().includes(search.toLowerCase())
-  )
-
-  return (
-    <div className="space-y-3">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <button onClick={onBack} className="flex items-center gap-1 text-xs text-navy hover:underline flex-shrink-0">
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+    <button
+      onClick={onToggle}
+      className={[
+        'w-full text-left flex items-center gap-3 px-4 py-2.5 border-b border-gray-100 last:border-0 transition-colors',
+        isSelected ? 'bg-blue-50' : 'bg-white hover:bg-gray-50',
+      ].join(' ')}
+    >
+      <div className={`w-4 h-4 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
+        isSelected ? 'bg-navy border-navy' : 'border-gray-300 bg-white'
+      }`}>
+        {isSelected && (
+          <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
-          All categories
-        </button>
-        <div className="flex-1 flex items-center justify-between min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-gray-800 truncate">{category}</span>
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${meta.badge}`}>{selCount}/{catIds.length} selected</span>
-          </div>
-          <div className="flex items-center gap-2 text-xs">
-            <button
-              onClick={() => onToggleAll(catIds, noneSel)}
-              className="text-navy hover:underline"
-            >
-              {noneSel ? 'Select all' : 'Deselect all'}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Search */}
-      <input
-        type="text"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder={`Search ${category} policies...`}
-        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
-        autoFocus
-      />
-
-      {/* Policy list */}
-      <div className="rounded-lg border border-gray-200 overflow-hidden overflow-y-auto" style={{maxHeight: 'calc(100vh - 380px)', minHeight: '320px'}}>
-        {filtered.map((p, i) => {
-          const isSelected = selected.includes(p.id)
-          return (
-            <button
-              key={p.id}
-              onClick={() => onTogglePolicy(p.id)}
-              className={[
-                'w-full text-left flex items-center gap-4 px-4 py-3 transition-colors relative',
-                i > 0 ? 'border-t border-gray-100' : '',
-                isSelected ? 'bg-blue-50' : 'bg-white hover:bg-gray-50',
-              ].join(' ')}
-            >
-              {/* selection accent bar */}
-              <span className={`absolute left-0 top-0 bottom-0 w-1 rounded-r transition-colors ${isSelected ? 'bg-navy' : 'bg-transparent'}`} />
-              {/* checkbox */}
-              <div className={`w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
-                isSelected ? 'bg-navy border-navy' : 'border-gray-300 bg-white'
-              }`}>
-                {isSelected && (
-                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                )}
-              </div>
-              {/* id */}
-              <span className="text-xs font-mono text-gray-400 w-12 flex-shrink-0">{p.id}</span>
-              {/* name + description */}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-800">{p.name}</p>
-                {p.description && <p className="text-xs text-gray-500 truncate mt-0.5">{p.description}</p>}
-              </div>
-              {/* severity */}
-              <div className="flex-shrink-0">{severityBadge(p.severity)}</div>
-            </button>
-          )
-        })}
-        {filtered.length === 0 && (
-          <p className="text-center text-sm text-gray-400 py-8">No policies match "{search}"</p>
         )}
       </div>
-    </div>
+      <span className="text-xs font-mono text-gray-400 w-12 flex-shrink-0">{p.id}</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-gray-800 truncate">{p.name}</p>
+      </div>
+      <div className="flex-shrink-0">{severityBadge(p.severity)}</div>
+    </button>
   )
 }
 
 function StepSelectPolicies({ selected, setSelected }) {
-  const [preset, setPreset] = useState(null)
-  const [drillCategory, setDrillCategory] = useState(null)
+  const [activeCat, setActiveCat] = useState(null)
+  const [search, setSearch] = useState('')
+  const selSet = useMemo(() => new Set(selected), [selected])
+  const categories = Object.keys(POLICIES_BY_CATEGORY)
 
-  function handlePresetSelect(p) {
-    setSelected(p === null ? [] : p.getIds())
-    setPreset(p ?? { id: 'custom', name: 'Custom' })
-    setDrillCategory(null)
+  const displayPolicies = useMemo(() => {
+    const q = search.toLowerCase().trim()
+    if (q) return POLICIES.filter(p => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q))
+    if (activeCat) return POLICIES_BY_CATEGORY[activeCat] || []
+    return POLICIES
+  }, [activeCat, search])
+
+  const groupedView = !search.trim() && !activeCat
+
+  function toggle(id) {
+    setSelected(s => selSet.has(id) ? s.filter(x => x !== id) : [...s, id])
   }
 
-  function togglePolicy(id) {
-    setSelected((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id])
-  }
-
-  function toggleAll(catIds, makeSelected) {
-    if (typeof makeSelected === 'boolean') {
-      setSelected((s) => makeSelected ? [...new Set([...s, ...catIds])] : s.filter((id) => !catIds.includes(id)))
-    } else {
-      // catIds is actually a boolean (global toggle from CategoryGrid)
-      const all = catIds
-      setSelected(all ? POLICIES.map((p) => p.id) : [])
-    }
-  }
-
-  if (!preset) {
-    return <PresetPicker onSelect={handlePresetSelect} />
-  }
-
-  if (drillCategory) {
-    return (
-      <CategoryDetail
-        category={drillCategory}
-        policies={POLICIES_BY_CATEGORY[drillCategory] || []}
-        selected={selected}
-        onTogglePolicy={togglePolicy}
-        onToggleAll={(catIds, makeSelected) => {
-          setSelected((s) => makeSelected ? [...new Set([...s, ...catIds])] : s.filter((id) => !catIds.includes(id)))
-        }}
-        onBack={() => setDrillCategory(null)}
-      />
-    )
+  function toggleCat(cat) {
+    const ids = (POLICIES_BY_CATEGORY[cat] || []).map(p => p.id)
+    const allSel = ids.every(id => selSet.has(id))
+    setSelected(s => allSel ? s.filter(id => !ids.includes(id)) : [...new Set([...s, ...ids])])
   }
 
   return (
-    <CategoryGrid
-      selected={selected}
-      onDrillIn={setDrillCategory}
-      onToggleAll={(all) => setSelected(all ? POLICIES.map((p) => p.id) : [])}
-      onChangePreset={() => { setPreset(null); setDrillCategory(null) }}
-    />
+    <div className="flex flex-col gap-3">
+      {/* Search + count bar */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search policies..."
+            className="w-full pl-9 pr-3 py-1.5 text-sm rounded-lg border border-gray-300 focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
+          />
+        </div>
+        <span className="text-sm text-gray-500 whitespace-nowrap">
+          <strong className="text-gray-900">{selected.length}</strong>/{POLICIES.length}
+        </span>
+        <button onClick={() => setSelected(POLICIES.map(p => p.id))} className="text-xs text-navy hover:underline whitespace-nowrap">All</button>
+        <button onClick={() => setSelected([])} className="text-xs text-gray-500 hover:underline whitespace-nowrap">None</button>
+      </div>
+
+      {/* Two-pane selector */}
+      <div className="flex rounded-lg border border-gray-200 overflow-hidden" style={{ height: '420px' }}>
+        {/* Category sidebar */}
+        <div className="w-44 flex-shrink-0 border-r border-gray-200 overflow-y-auto bg-gray-50">
+          <button
+            onClick={() => { setActiveCat(null); setSearch('') }}
+            className={`w-full flex items-center justify-between px-3 py-2.5 text-xs font-medium border-b border-gray-200 transition-colors ${!activeCat && !search ? 'bg-navy text-white' : 'text-gray-700 hover:bg-white'}`}
+          >
+            <span>All policies</span>
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${!activeCat && !search ? 'bg-white/20' : 'bg-gray-200 text-gray-600'}`}>{selected.length}</span>
+          </button>
+          {categories.map(cat => {
+            const catIds = (POLICIES_BY_CATEGORY[cat] || []).map(p => p.id)
+            const selCount = catIds.filter(id => selSet.has(id)).length
+            const isActive = activeCat === cat && !search
+            const meta = CATEGORY_META[cat] || {}
+            return (
+              <button
+                key={cat}
+                onClick={() => { setActiveCat(cat); setSearch('') }}
+                className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left border-b border-gray-100 transition-colors ${
+                  isActive ? 'bg-navy-50 text-navy font-semibold border-l-2 border-l-navy' : 'text-gray-600 hover:bg-white'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${meta.dot || 'bg-gray-400'}`} />
+                  <span className="truncate leading-snug">{cat}</span>
+                </div>
+                <span className={`ml-1 flex-shrink-0 px-1 py-0.5 rounded text-xs ${
+                  selCount === catIds.length && catIds.length > 0 ? 'bg-green-100 text-green-700' :
+                  selCount > 0 ? 'bg-blue-50 text-navy' : 'bg-gray-100 text-gray-500'
+                }`}>{selCount}/{catIds.length}</span>
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Policy list */}
+        <div className="flex-1 overflow-y-auto">
+          {search.trim() && displayPolicies.length === 0 ? (
+            <p className="text-center text-sm text-gray-400 py-10">No policies match "{search}"</p>
+          ) : groupedView ? (
+            categories.map(cat => {
+              const catPolicies = POLICIES_BY_CATEGORY[cat] || []
+              const catIds = catPolicies.map(p => p.id)
+              const selCount = catIds.filter(id => selSet.has(id)).length
+              const meta = CATEGORY_META[cat] || {}
+              return (
+                <div key={cat}>
+                  <div className="flex items-center justify-between px-4 py-1.5 bg-gray-50 border-b border-gray-100 sticky top-0 z-10">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${meta.dot || 'bg-gray-400'}`} />
+                      <span className="text-xs font-semibold text-gray-600">{cat}</span>
+                      <span className="text-xs text-gray-400">({selCount}/{catIds.length})</span>
+                    </div>
+                    <button onClick={() => toggleCat(cat)} className="text-xs text-navy hover:underline">
+                      {selCount === catIds.length ? 'Deselect' : 'Select all'}
+                    </button>
+                  </div>
+                  {catPolicies.map(p => (
+                    <PolicyRow key={p.id} p={p} isSelected={selSet.has(p.id)} onToggle={() => toggle(p.id)} />
+                  ))}
+                </div>
+              )
+            })
+          ) : (
+            displayPolicies.map(p => (
+              <PolicyRow key={p.id} p={p} isSelected={selSet.has(p.id)} onToggle={() => toggle(p.id)} />
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Per-category quick actions when a single category is active */}
+      {activeCat && !search && (() => {
+        const catIds = (POLICIES_BY_CATEGORY[activeCat] || []).map(p => p.id)
+        const selCount = catIds.filter(id => selSet.has(id)).length
+        return (
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <span>{selCount}/{catIds.length} selected in {activeCat}</span>
+            <button onClick={() => toggleCat(activeCat)} className="text-navy hover:underline">
+              {selCount === catIds.length ? 'Deselect all in category' : 'Select all in category'}
+            </button>
+          </div>
+        )
+      })()}
+    </div>
   )
 }
 
@@ -714,6 +615,7 @@ export default function CreatePolicies() {
   const [deployResults, setDeployResults] = useState({})
   const [running, setRunning] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [useDeviceCode, setUseDeviceCode] = useState(false)
 
   // Auto-set prefix from org name when it changes
   useEffect(() => {
@@ -745,6 +647,7 @@ export default function CreatePolicies() {
     setAuthMode(mode)
     setOrg(null)
     setCredentials(null)
+    setUseDeviceCode(false)
   }
 
   const handleDeploy = async () => {
@@ -761,6 +664,7 @@ export default function CreatePolicies() {
         prefix: usePrefix ? prefix : '',
         authMode,
         policyConfigs,
+        useDeviceCode,
       })
       setDeployResults(result.results || {})
       const successCount = Object.values(result.results || {}).filter((v) => v === 'success').length
@@ -809,6 +713,7 @@ export default function CreatePolicies() {
               authMode={authMode}
               org={org} setOrg={setOrg}
               credentials={credentials} setCredentials={setCredentials}
+              useDeviceCode={useDeviceCode} setUseDeviceCode={setUseDeviceCode}
             />
           )}
           {step === 2 && (

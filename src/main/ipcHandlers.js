@@ -154,8 +154,8 @@ try {
   })
 
   ipcMain.handle('policies:create', async (_, options) => {
-    const { policies, credentials, prefix, authMode, policyConfigs } = options
-    const script = buildScript(policies, credentials, prefix, authMode, policyConfigs || {})
+    const { policies, credentials, prefix, authMode, policyConfigs, useDeviceCode } = options
+    const script = buildScript(policies, credentials, prefix, authMode, policyConfigs || {}, { useDeviceCode })
     const logs = []
     const results = {}
 
@@ -219,11 +219,9 @@ Write-Output "CONNECTING: Authenticating..."
 ${connectBlock}
 Write-Output "CONNECTED: Reading Conditional Access policies..."
 try {
-  $policies = Get-MgIdentityConditionalAccessPolicy -All | ForEach-Object {
-    [PSCustomObject]@{ Id=$_.Id; DisplayName=$_.DisplayName; State=$_.State }
-  }
+  $policies = Get-MgIdentityConditionalAccessPolicy -All
   $count = @($policies).Count
-  Write-Output "DATA:$(($policies | ConvertTo-Json -Compress -Depth 3))"
+  Write-Output "DATA:$(($policies | ConvertTo-Json -Compress -Depth 10))"
   Write-Output "DONE: $count policies found"
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
