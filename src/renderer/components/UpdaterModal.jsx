@@ -48,12 +48,7 @@ export default function UpdaterModal() {
                 )}
               </div>
             </div>
-            {updaterInfo?.releaseNotes && (
-              <div className="max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-3">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Release Notes</p>
-                <p className="text-sm text-gray-700 whitespace-pre-wrap">{updaterInfo.releaseNotes}</p>
-              </div>
-            )}
+            <p className="text-sm text-gray-600">A new version is available. Click below to download and install.</p>
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="ghost" onClick={dismissUpdater}>Later</Button>
               <Button variant="primary" onClick={triggerDownload}>Download &amp; Install</Button>

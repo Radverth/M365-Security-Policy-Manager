@@ -179,7 +179,7 @@ export default function Settings() {
           <Card.Body>
             <FormGroup
               label="Default Policy Prefix"
-              hint='Optional prefix prepended to all created policy names (e.g., "ACME Corp" → "ACME Corp — CA001: Require MFA").'
+              hint='Optional prefix prepended to all created policy names (e.g., "AffinityIT" → "AffinityIT — CA001: Require MFA").'
             >
               <TextInput
                 value={form.defaultPolicyPrefix}
