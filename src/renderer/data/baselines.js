@@ -22,7 +22,7 @@ export const BASELINES = [
     ],
     policyIds: [
       'CA001', 'CA002', 'CA003', 'CA004',
-      'CA006', 'CA019', 'CA033', 'CA050',
+      'CA006', 'CA019', 'CA033',
     ],
   },
 
