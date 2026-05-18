@@ -1,7 +1,7 @@
 {
   "name": "m365-policy-manager",
   "productName": "M365 Security Policy Manager",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Cross-platform Electron desktop app for M365 security policy management",
   "main": "src/main/index.js",
   "scripts": {
@@ -36,18 +36,42 @@
     ],
     "linux": {
       "target": [
-        { "target": "AppImage", "arch": ["x64"] },
-        { "target": "deb", "arch": ["x64"] }
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "category": "Utility",
       "icon": "assets/icon.png"
     },
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "assets/icon.ico"
     },
     "mac": {
-      "target": [{ "target": "dmg" }, { "target": "zip" }],
+      "target": [
+        {
+          "target": "dmg"
+        },
+        {
+          "target": "zip"
+        }
+      ],
       "icon": "assets/icon.icns"
     },
     "nsis": {
