@@ -307,17 +307,27 @@ const CATEGORY_META = {
   ) },
 }
 
-function PolicyRow({ p, isSelected, onToggle }) {
+const SEVERITY_DOT = {
+  critical: 'bg-red-500',
+  high: 'bg-orange-400',
+  medium: 'bg-amber-400',
+  low: 'bg-blue-400',
+  info: 'bg-gray-400',
+}
+
+function PolicyGridItem({ p, isSelected, onToggle }) {
   return (
     <button
       onClick={onToggle}
       className={[
-        'w-full text-left flex items-center gap-3 px-4 py-2.5 border-b border-gray-100 last:border-0 transition-colors',
-        isSelected ? 'bg-blue-50' : 'bg-white hover:bg-gray-50',
+        'flex items-center gap-2 px-3 py-2 rounded-lg border text-left transition-colors w-full',
+        isSelected
+          ? 'bg-navy/5 border-navy/25'
+          : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50',
       ].join(' ')}
     >
       <div className={`w-4 h-4 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
-        isSelected ? 'bg-navy border-navy' : 'border-gray-300 bg-white'
+        isSelected ? 'bg-navy border-navy' : 'border-gray-300'
       }`}>
         {isSelected && (
           <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
@@ -325,11 +335,9 @@ function PolicyRow({ p, isSelected, onToggle }) {
           </svg>
         )}
       </div>
-      <span className="text-xs font-mono text-gray-400 w-12 flex-shrink-0">{p.id}</span>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm text-gray-800 truncate">{p.name}</p>
-      </div>
-      <div className="flex-shrink-0">{severityBadge(p.severity)}</div>
+      <span className="text-xs font-mono text-gray-400 w-10 flex-shrink-0">{p.id}</span>
+      <span className="text-xs text-gray-800 flex-1 min-w-0 truncate">{p.name}</span>
+      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${SEVERITY_DOT[p.severity] || 'bg-gray-400'}`} title={p.severity} />
     </button>
   )
 }
@@ -382,8 +390,8 @@ function StepSelectPolicies({ selected, setSelected }) {
         <button onClick={() => setSelected([])} className="text-xs text-gray-500 hover:underline whitespace-nowrap">None</button>
       </div>
 
-      {/* Two-pane selector */}
-      <div className="flex rounded-lg border border-gray-200 overflow-hidden" style={{ height: '420px' }}>
+      {/* Two-pane selector — fills remaining viewport height */}
+      <div className="flex rounded-lg border border-gray-200 overflow-hidden" style={{ height: 'calc(100vh - 390px)', minHeight: '380px' }}>
         {/* Category sidebar */}
         <div className="w-44 flex-shrink-0 border-r border-gray-200 overflow-y-auto bg-gray-50">
           <button
@@ -419,8 +427,8 @@ function StepSelectPolicies({ selected, setSelected }) {
           })}
         </div>
 
-        {/* Policy list */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Policy grid — 2 columns so most categories fit without scrolling */}
+        <div className="flex-1 overflow-y-auto p-3">
           {search.trim() && displayPolicies.length === 0 ? (
             <p className="text-center text-sm text-gray-400 py-10">No policies match "{search}"</p>
           ) : groupedView ? (
@@ -430,8 +438,8 @@ function StepSelectPolicies({ selected, setSelected }) {
               const selCount = catIds.filter(id => selSet.has(id)).length
               const meta = CATEGORY_META[cat] || {}
               return (
-                <div key={cat}>
-                  <div className="flex items-center justify-between px-4 py-1.5 bg-gray-50 border-b border-gray-100 sticky top-0 z-10">
+                <div key={cat} className="mb-4">
+                  <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-1.5">
                       <span className={`w-2 h-2 rounded-full ${meta.dot || 'bg-gray-400'}`} />
                       <span className="text-xs font-semibold text-gray-600">{cat}</span>
@@ -441,16 +449,20 @@ function StepSelectPolicies({ selected, setSelected }) {
                       {selCount === catIds.length ? 'Deselect' : 'Select all'}
                     </button>
                   </div>
-                  {catPolicies.map(p => (
-                    <PolicyRow key={p.id} p={p} isSelected={selSet.has(p.id)} onToggle={() => toggle(p.id)} />
-                  ))}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {catPolicies.map(p => (
+                      <PolicyGridItem key={p.id} p={p} isSelected={selSet.has(p.id)} onToggle={() => toggle(p.id)} />
+                    ))}
+                  </div>
                 </div>
               )
             })
           ) : (
-            displayPolicies.map(p => (
-              <PolicyRow key={p.id} p={p} isSelected={selSet.has(p.id)} onToggle={() => toggle(p.id)} />
-            ))
+            <div className="grid grid-cols-2 gap-1.5">
+              {displayPolicies.map(p => (
+                <PolicyGridItem key={p.id} p={p} isSelected={selSet.has(p.id)} onToggle={() => toggle(p.id)} />
+              ))}
+            </div>
           )}
         </div>
       </div>
