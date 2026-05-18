@@ -473,7 +473,7 @@ function CategoryDetail({ category, policies, selected, onTogglePolicy, onToggle
       />
 
       {/* Policy list */}
-      <div className="rounded-lg border border-gray-200 overflow-hidden max-h-[360px] overflow-y-auto">
+      <div className="rounded-lg border border-gray-200 overflow-hidden overflow-y-auto" style={{maxHeight: 'calc(100vh - 380px)', minHeight: '320px'}}>
         {filtered.map((p, i) => {
           const isSelected = selected.includes(p.id)
           return (
@@ -481,37 +481,37 @@ function CategoryDetail({ category, policies, selected, onTogglePolicy, onToggle
               key={p.id}
               onClick={() => onTogglePolicy(p.id)}
               className={[
-                'w-full text-left flex items-center gap-3 px-3 py-2 transition-colors relative',
+                'w-full text-left flex items-center gap-4 px-4 py-3 transition-colors relative',
                 i > 0 ? 'border-t border-gray-100' : '',
                 isSelected ? 'bg-blue-50' : 'bg-white hover:bg-gray-50',
               ].join(' ')}
             >
               {/* selection accent bar */}
-              <span className={`absolute left-0 top-0 bottom-0 w-0.5 transition-colors ${isSelected ? 'bg-navy' : 'bg-transparent'}`} />
+              <span className={`absolute left-0 top-0 bottom-0 w-1 rounded-r transition-colors ${isSelected ? 'bg-navy' : 'bg-transparent'}`} />
               {/* checkbox */}
-              <div className={`w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-colors ${
+              <div className={`w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
                 isSelected ? 'bg-navy border-navy' : 'border-gray-300 bg-white'
               }`}>
                 {isSelected && (
-                  <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 )}
               </div>
               {/* id */}
-              <span className="text-xs font-mono text-gray-400 w-10 flex-shrink-0">{p.id}</span>
+              <span className="text-xs font-mono text-gray-400 w-12 flex-shrink-0">{p.id}</span>
               {/* name + description */}
               <div className="flex-1 min-w-0">
-                <span className="text-sm text-gray-800 leading-tight">{p.name}</span>
-                {p.description && <p className="text-xs text-gray-400 truncate leading-tight mt-0.5">{p.description}</p>}
+                <p className="text-sm font-medium text-gray-800">{p.name}</p>
+                {p.description && <p className="text-xs text-gray-500 truncate mt-0.5">{p.description}</p>}
               </div>
               {/* severity */}
-              {severityBadge(p.severity)}
+              <div className="flex-shrink-0">{severityBadge(p.severity)}</div>
             </button>
           )
         })}
         {filtered.length === 0 && (
-          <p className="text-center text-sm text-gray-400 py-6">No policies match "{search}"</p>
+          <p className="text-center text-sm text-gray-400 py-8">No policies match "{search}"</p>
         )}
       </div>
     </div>
