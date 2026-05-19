@@ -160,4 +160,63 @@ function runScript(script, onData, onError) {
   })
 }
 
-module.exports = { runScript, checkPowerShell, getPwshPath }
+// Runs a PS script in a VISIBLE console window so WAM can attach its dialog.
+// Returns { exitCode, output } — no streaming callbacks needed for auth scripts.
+function runScriptVisible(script) {
+  return new Promise((resolve, reject) => {
+    const pwsh = getPwshPath()
+    const execPolicy = store.get('executionPolicy') || 'RemoteSigned'
+
+    const tmpFile = path.join(
+      os.tmpdir(),
+      `m365ps-auth-${Date.now()}-${Math.random().toString(36).slice(2)}.ps1`
+    )
+
+    // UTF-8 output encoding; no AutoFlush needed — script is short
+    const fullScript = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n${script}`
+
+    try {
+      fs.writeFileSync(tmpFile, fullScript, 'utf8')
+    } catch (err) {
+      reject(err)
+      return
+    }
+
+    const proc = spawn(pwsh, [
+      '-NoProfile',
+      '-ExecutionPolicy', execPolicy,
+      '-File', tmpFile,
+    ], {
+      // windowsHide omitted / false — PS gets a real console window so WAM has a handle
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env },
+    })
+
+    const allOutput = []
+    const cleanup = () => { try { fs.unlinkSync(tmpFile) } catch {} }
+
+    proc.stdout.on('data', (data) => {
+      data.toString('utf8').split('\n').forEach(line => {
+        const l = line.trimEnd()
+        if (l.trim()) { allOutput.push(l); logger.ps(`[auth] ${l}`) }
+      })
+    })
+    proc.stderr.on('data', (data) => {
+      data.toString('utf8').split('\n').forEach(line => {
+        const l = line.trimEnd()
+        if (l.trim()) logger.psErr(`[auth] ${l}`)
+      })
+    })
+    proc.on('close', (code) => {
+      logger.info(`PS auth exited with code ${code}`)
+      cleanup()
+      resolve({ exitCode: code, output: allOutput.join('\n') })
+    })
+    proc.on('error', (err) => {
+      cleanup()
+      reject(err)
+    })
+  })
+}
+
+module.exports = { runScript, runScriptVisible, checkPowerShell, getPwshPath }

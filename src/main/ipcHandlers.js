@@ -1,5 +1,5 @@
 const { ipcMain, app, shell } = require('electron')
-const { checkPowerShell, runScript } = require('./powershell')
+const { checkPowerShell, runScript, runScriptVisible } = require('./powershell')
 const { getModuleStatus, installModules, updateModules } = require('./moduleManager')
 const itGlue = require('./itGlue')
 const { buildScript, buildConnectGraph } = require('./policyBuilder')
@@ -8,6 +8,52 @@ const logger = require('./logger')
 const path = require('path')
 const { execFile } = require('child_process')
 const fs = require('fs')
+
+// All scopes needed across any Graph operation in this app
+const WAM_SCOPES = 'Policy.ReadWrite.ConditionalAccess Policy.Read.All DeviceManagementConfiguration.ReadWrite.All Organization.ReadWrite.All Directory.ReadWrite.All RoleManagement.ReadWrite.Directory AuditLog.Read.All'
+
+// Run a visible PS window so WAM has a window handle to attach its dialog to.
+// After success, the MSAL token cache on disk holds the token, and subsequent
+// hidden -Silent calls in the same user session can reuse it without re-prompting.
+async function doWamAuth(win) {
+  if (process.platform !== 'win32') return { ok: false, reason: 'not-windows' }
+
+  win.webContents.send('ps:output', 'Opening Microsoft sign-in window...')
+  logger.info('WAM auth: launching visible PS for interactive sign-in')
+
+  const script = `
+$ProgressPreference = 'SilentlyContinue'
+$VerbosePreference  = 'SilentlyContinue'
+if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
+  Write-Output "WAM_FAIL: Microsoft.Graph module not found"
+  exit 1
+}
+Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+try {
+  Connect-MgGraph -Scopes "${WAM_SCOPES}" -NoWelcome -ErrorAction Stop
+  Write-Output "WAM_OK"
+} catch {
+  Write-Output "WAM_FAIL: $($_.Exception.Message)"
+  exit 1
+}
+`
+  try {
+    const { output } = await runScriptVisible(script)
+    if (output.includes('WAM_OK')) {
+      logger.info('WAM auth: success')
+      win.webContents.send('ps:output', 'Signed in successfully.')
+      return { ok: true }
+    }
+    const failLine = output.split('\n').find(l => l.startsWith('WAM_FAIL:'))
+    const reason = failLine ? failLine.slice('WAM_FAIL:'.length).trim() : 'unknown'
+    logger.warn(`WAM auth: failed - ${reason}`)
+    win.webContents.send('ps:output', `ERROR: Sign-in failed - ${reason}`)
+    return { ok: false, reason }
+  } catch (err) {
+    logger.error(`WAM auth error: ${err.message}`)
+    return { ok: false, reason: err.message }
+  }
+}
 
 function registerIpcHandlers(win) {
   // Store
@@ -121,9 +167,29 @@ function registerIpcHandlers(win) {
     const loginHint = (authMode !== 'interactive' && credentials?.username)
       ? `-LoginHint '${credentials.username.replace(/'/g, "''")}'`
       : ''
-    const connectArgs = authMode === 'interactive'
-      ? `-UseDeviceAuthentication -Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome`
-      : `-Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome ${loginHint}`
+
+    // On Windows, WAM auth runs in a visible PS window first so the MSAL token is cached.
+    // The main script then uses -Silent to reuse that token without prompting again.
+    // On Linux/Mac (no WAM), fall back to device code directly.
+    if (authMode === 'interactive' && process.platform === 'win32') {
+      const wam = await doWamAuth(win)
+      if (!wam.ok) return []
+    }
+
+    const connectBlock = authMode === 'interactive'
+      ? process.platform === 'win32'
+        ? `
+Write-Output "Connecting to Microsoft Graph..."
+Connect-MgGraph -Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome -Silent -ErrorAction Stop
+Write-Output "Connected."`
+        : `
+Write-Output "Follow the device code prompt below..."
+Connect-MgGraph -UseDeviceAuthentication -Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome -ErrorAction Stop
+Write-Output "Connected."`
+      : `
+Write-Output "Connecting to Microsoft Graph..."
+Connect-MgGraph -Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome ${loginHint}
+Write-Output "Connected."`
 
     const script = `
 $ProgressPreference = 'SilentlyContinue'
@@ -134,16 +200,16 @@ if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
 Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
 Import-Module Microsoft.Graph.Identity.SignIns -ErrorAction SilentlyContinue
 try {
-  Write-Output "Connecting to Microsoft Graph..."
-  Connect-MgGraph ${connectArgs}
-  Write-Output "Connected. Fetching policies..."
+  ${connectBlock}
+  Write-Output "Fetching policies..."
   $policies = Get-MgIdentityConditionalAccessPolicy -All
   Write-Output "POLICY_JSON_START"
   $policies | ConvertTo-Json -Depth 10
   Write-Output "POLICY_JSON_END"
-  Disconnect-MgGraph | Out-Null
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
+} finally {
+  try { Disconnect-MgGraph -ErrorAction SilentlyContinue } catch {}
 }
 `
     const lines = []
@@ -165,6 +231,10 @@ try {
   ipcMain.handle('policies:create', async (_, options) => {
     const { policies, credentials, prefix, authMode, policyConfigs, useDeviceCode } = options
     logger.info(`IPC: policies:create count=${policies?.length} authMode=${authMode} prefix=${prefix}`)
+    if (authMode === 'interactive' && process.platform === 'win32') {
+      const wam = await doWamAuth(win)
+      if (!wam.ok) return { logs: [`ERROR: Sign-in failed - ${wam.reason}`], results: {} }
+    }
     const script = buildScript(policies, credentials, prefix, authMode, policyConfigs || {}, { useDeviceCode })
     const logs = []
     const results = {}
@@ -200,7 +270,7 @@ Import-Module Microsoft.Graph.Identity.SignIns -ErrorAction SilentlyContinue
 try {
   Connect-MgGraph -Scopes 'Policy.ReadWrite.ConditionalAccess' -NoWelcome -Silent -ErrorAction Stop
 } catch {
-  Write-Output "ERROR: Session expired - please reload policies to reconnect."
+  Write-Output "ERROR: Session expired - reload policies to sign in again."
   exit 1
 }`
 
@@ -277,6 +347,12 @@ try {
   ipcMain.handle('report:audit', async (_, options) => {
     const { credentials, authMode } = options || {}
     logger.info(`IPC: report:audit authMode=${authMode}`)
+
+    if (authMode === 'interactive' && process.platform === 'win32') {
+      const wam = await doWamAuth(win)
+      if (!wam.ok) return { error: `Sign-in failed - ${wam.reason}` }
+    }
+
     const connectBlock = buildConnectGraph(credentials, authMode)
 
     const script = `
