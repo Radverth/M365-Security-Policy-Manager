@@ -9,6 +9,7 @@ import LogPanel from '../components/LogPanel'
 import SearchInput from '../components/SearchInput'
 import Modal from '../components/Modal'
 import ConfigurePolicies from './ConfigurePolicies'
+import DeviceCodeModal, { parseDeviceCode } from '../components/DeviceCodeModal'
 
 const STEPS = ['Org & Credentials', 'Configure Prefix', 'Select Policies', 'Configure Policies', 'Review', 'Deploy']
 
@@ -652,6 +653,7 @@ export default function CreatePolicies() {
   const [running, setRunning] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [useDeviceCode, setUseDeviceCode] = useState(false)
+  const [deviceCodeInfo, setDeviceCodeInfo] = useState(null)
 
   // Auto-set prefix from org name when it changes
   useEffect(() => {
@@ -660,7 +662,12 @@ export default function CreatePolicies() {
 
   useEffect(() => {
     if (!window.api) return
-    const unOut = window.api.onPsOutput((line) => setDeployLogs((l) => [...l, { line, type: 'output' }]))
+    const unOut = window.api.onPsOutput((line) => {
+      setDeployLogs((l) => [...l, { line, type: 'output' }])
+      const dc = parseDeviceCode(line)
+      if (dc) setDeviceCodeInfo(dc)
+      if (/connected\.|CONNECTED:|welcome to microsoft graph/i.test(line)) setDeviceCodeInfo(null)
+    })
     const unErr = window.api.onPsError((line) => setDeployLogs((l) => [...l, { line, type: 'error' }]))
     return () => { unOut?.(); unErr?.() }
   }, [])
@@ -822,6 +829,7 @@ export default function CreatePolicies() {
         </div>
       </Modal>
 
+      <DeviceCodeModal info={deviceCodeInfo} onDismiss={() => setDeviceCodeInfo(null)} />
     </div>
   )
 }

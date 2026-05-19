@@ -7,6 +7,7 @@ import Modal from '../components/Modal'
 import SlideOver from '../components/SlideOver'
 import SearchInput from '../components/SearchInput'
 import LogPanel from '../components/LogPanel'
+import DeviceCodeModal, { parseDeviceCode } from '../components/DeviceCodeModal'
 
 // Handle PascalCase (PS) and camelCase (Graph API) property names
 function pick(obj, ...keys) {
@@ -286,10 +287,16 @@ export default function ManagePolicies() {
   const [editTarget, setEditTarget] = useState(null)
   const [saveLoading, setSaveLoading] = useState(false)
   const [authLogs, setAuthLogs] = useState([])
+  const [deviceCodeInfo, setDeviceCodeInfo] = useState(null)
 
   useEffect(() => {
     if (!window.api) return
-    const unOut = window.api.onPsOutput((line) => setAuthLogs((l) => [...l, { line, type: 'output' }]))
+    const unOut = window.api.onPsOutput((line) => {
+      setAuthLogs((l) => [...l, { line, type: 'output' }])
+      const dc = parseDeviceCode(line)
+      if (dc) setDeviceCodeInfo(dc)
+      if (/connected\.|CONNECTED:|welcome to microsoft graph/i.test(line)) setDeviceCodeInfo(null)
+    })
     const unErr = window.api.onPsError((line) => setAuthLogs((l) => [...l, { line, type: 'error' }]))
     return () => { unOut?.(); unErr?.() }
   }, [])
@@ -315,6 +322,7 @@ export default function ManagePolicies() {
       setPolicies(Array.isArray(loadedPolicies) ? loadedPolicies : [])
       setSelectedRows(new Set())
       if (context) setConnectedAs(context)
+      setDeviceCodeInfo(null)
     } catch (err) {
       addNotification('Failed to load policies: ' + err.message, 'error')
     } finally {
@@ -570,28 +578,50 @@ export default function ManagePolicies() {
                       <td className="px-4 py-3">{stateBadge(policy.State)}</td>
                       <td className="px-4 py-3 text-xs text-gray-500">{formatDate(policy.CreatedDateTime)}</td>
                       <td className="px-4 py-3 text-xs text-gray-500">{formatDate(policy.ModifiedDateTime)}</td>
-                      <td className="px-6 py-3 text-right">
-                        <div className="flex justify-end gap-1">
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex justify-end items-center gap-1">
                           {managed ? (
-                            <Button size="sm" variant="ghost" onClick={() => handleEdit(policy)}>Edit</Button>
+                            <button
+                              onClick={() => handleEdit(policy)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                              Edit
+                            </button>
                           ) : (
-                            <Button
-                              size="sm"
-                              variant="ghost"
+                            <button
                               onClick={() => {
                                 const url = `https://entra.microsoft.com/#view/Microsoft_AAD_ConditionalAccess/PolicyBlade/policyId/${policy.Id}`
                                 window.api?.app?.openExternal(url)
                               }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+                              title="Open in Entra portal"
                             >
-                              Open in Entra ↗
-                            </Button>
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                              </svg>
+                              Entra
+                            </button>
                           )}
-                          <Button size="sm" variant="ghost" onClick={() => handleToggle(policy)}>
+                          <button
+                            onClick={() => handleToggle(policy)}
+                            className={[
+                              'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors',
+                              policy.State === 'enabled'
+                                ? 'text-amber-600 hover:bg-amber-50'
+                                : 'text-emerald-600 hover:bg-emerald-50',
+                            ].join(' ')}
+                          >
                             {policy.State === 'enabled' ? 'Disable' : 'Enable'}
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(policy)}>
-                            <span className="text-red-600">Delete</span>
-                          </Button>
+                          </button>
+                          <button
+                            onClick={() => setDeleteTarget(policy)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-red-500 hover:bg-red-50 transition-colors"
+                          >
+                            Delete
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -626,6 +656,8 @@ export default function ManagePolicies() {
           saving={saveLoading}
         />
       </SlideOver>
+
+      <DeviceCodeModal info={deviceCodeInfo} onDismiss={() => setDeviceCodeInfo(null)} />
     </div>
   )
 }

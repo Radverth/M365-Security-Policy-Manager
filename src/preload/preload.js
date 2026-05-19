@@ -84,7 +84,7 @@ contextBridge.exposeInMainWorld('api', {
   // Report
   report: {
     audit: (options) => ipcRenderer.invoke('report:audit', options),
-    savePDF: (orgName) => ipcRenderer.invoke('app:savePDF', orgName),
+    savePDF: (orgName, policies) => ipcRenderer.invoke('app:savePDF', orgName, policies),
   },
 
   // PS event listeners

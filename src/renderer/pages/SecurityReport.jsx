@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import useStore from '../store'
 import Button from '../components/Button'
+import DeviceCodeModal, { parseDeviceCode } from '../components/DeviceCodeModal'
 
 // ── Data helpers ──────────────────────────────────────────────────────────────
 
@@ -408,26 +409,17 @@ function ReportView({ orgName, tenantPolicies, date, logs }) {
   async function handleExportPDF() {
     setSaving(true)
     setSavedPath(null)
-    const style = document.createElement('style')
-    style.textContent = [
-      '@media print {',
-      '  @page { margin: 12mm; size: A4 portrait; }',
-      '  body * { visibility: hidden !important; }',
-      '  #report-printable, #report-printable * { visibility: visible !important; }',
-      '  #report-printable { position: fixed; top: 0; left: 0; width: 100%; }',
-      '  .no-print { display: none !important; }',
-      '}',
-    ].join('\n')
-    document.head.appendChild(style)
     try {
-      const result = await window.api.report.savePDF(orgName)
+      const result = await window.api.report.savePDF(orgName, tenantPolicies)
       if (result?.path) {
         setSavedPath(result.path)
-        setTimeout(() => setSavedPath(null), 5000)
+        setTimeout(() => setSavedPath(null), 6000)
+      } else if (result?.cancelled) {
+        // user cancelled dialog — no-op
       }
-    } catch {}
-    finally {
-      document.head.removeChild(style)
+    } catch (e) {
+      // swallow
+    } finally {
       setSaving(false)
     }
   }
@@ -707,6 +699,7 @@ export default function SecurityReport() {
   const [logs, setLogs] = useState([])
   const [report, setReport] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
+  const [deviceCodeInfo, setDeviceCodeInfo] = useState(null)
 
   const canGenerate = useCallback(() => {
     if (!org?.name) return false
@@ -727,7 +720,12 @@ export default function SecurityReport() {
     setReport(null)
     setErrorMsg('')
 
-    const unsub = window.api?.onPsOutput?.((line) => setLogs(prev => [...prev, line]))
+    const unsub = window.api?.onPsOutput?.((line) => {
+      setLogs(prev => [...prev, line])
+      const dc = parseDeviceCode(line)
+      if (dc) setDeviceCodeInfo(dc)
+      if (/connected\.|CONNECTED:|welcome to microsoft graph/i.test(line)) setDeviceCodeInfo(null)
+    })
 
     try {
       const result = await window.api.report.audit({
@@ -750,6 +748,7 @@ export default function SecurityReport() {
       setErrorMsg(err.message || 'Unknown error')
       setStatus('error')
     } finally {
+      setDeviceCodeInfo(null)
       unsub?.()
     }
   }
@@ -839,6 +838,8 @@ export default function SecurityReport() {
           <EmptyState />
         )}
       </main>
+
+      <DeviceCodeModal info={deviceCodeInfo} onDismiss={() => setDeviceCodeInfo(null)} />
     </div>
   )
 }
