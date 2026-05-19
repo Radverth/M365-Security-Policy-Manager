@@ -354,25 +354,40 @@ function PolicyCard({ policy }) {
 
 function AffinityReportHeader({ orgName, date }) {
   return (
-    <div className="rounded-xl overflow-hidden mb-6" style={{ background: '#1a2d4a' }}>
-      <div className="relative px-8 py-6 overflow-hidden">
-        <svg className="absolute -top-3 -left-3 opacity-70" width="90" height="90" viewBox="0 0 90 90" fill="none">
-          <path d="M8 55 L8 8 L55 8" stroke="#E8A830" strokeWidth="5" strokeLinecap="round"/>
-          <path d="M16 55 L16 16 L55 16" stroke="#E8A830" strokeWidth="3" strokeLinecap="round" strokeOpacity="0.45"/>
-        </svg>
-        <svg className="absolute -bottom-3 -right-3 opacity-70" width="90" height="90" viewBox="0 0 90 90" fill="none">
-          <path d="M82 35 L82 82 L35 82" stroke="#E8A830" strokeWidth="5" strokeLinecap="round"/>
-          <path d="M74 35 L74 74 L35 74" stroke="#E8A830" strokeWidth="3" strokeLinecap="round" strokeOpacity="0.45"/>
-        </svg>
-        <div className="relative z-10 flex items-end justify-between">
-          <div>
-            <p className="text-4xl font-thin text-white tracking-tight leading-none" style={{ fontWeight: 300 }}>affinity</p>
-            <p className="text-sm mt-1.5 font-light" style={{ color: '#E8A830' }}>Technology. Together.</p>
+    <div style={{
+      background: '#1a2d4a',
+      borderRadius: '12px',
+      overflow: 'hidden',
+      marginBottom: '24px',
+      WebkitPrintColorAdjust: 'exact',
+      printColorAdjust: 'exact',
+    }}>
+      {/* Gold accent bar */}
+      <div style={{ height: '5px', background: 'linear-gradient(90deg, #b87820 0%, #E8A830 35%, #f5d080 65%, #E8A830 100%)' }} />
+      <div style={{ padding: '28px 40px 32px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '24px' }}>
+          {/* Brand */}
+          <div style={{ flexShrink: 0 }}>
+            <div style={{ fontSize: '40px', fontWeight: 200, color: '#ffffff', letterSpacing: '-1.5px', lineHeight: 1, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+              affinity
+            </div>
+            <div style={{ fontSize: '12px', color: '#E8A830', marginTop: '8px', letterSpacing: '0.5px', fontWeight: 400 }}>
+              Technology. Together.
+            </div>
           </div>
-          <div className="text-right space-y-1">
-            <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>M365 Security Policy Report</p>
-            <p className="text-lg font-semibold text-white">{orgName || 'Tenant'}</p>
-            <p className="text-sm" style={{ color: 'rgba(255,255,255,0.6)' }}>{date}</p>
+          {/* Divider */}
+          <div style={{ flex: 1, borderBottom: '1px solid rgba(255,255,255,0.12)', marginBottom: '6px' }} />
+          {/* Report meta */}
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '2.5px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.35)', marginBottom: '10px' }}>
+              M365 Security Policy Report
+            </div>
+            <div style={{ fontSize: '22px', fontWeight: 600, color: '#ffffff', lineHeight: 1.2, marginBottom: '5px' }}>
+              {orgName || 'Tenant'}
+            </div>
+            <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.55)' }}>
+              {date}
+            </div>
           </div>
         </div>
       </div>
@@ -384,16 +399,37 @@ function AffinityReportHeader({ orgName, date }) {
 
 function ReportView({ orgName, tenantPolicies, date, logs }) {
   const [showConsole, setShowConsole] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [savedPath, setSavedPath] = useState(null)
   const enabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabled').length
   const reportOnly = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabledForReportingButNotEnforced').length
   const disabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'disabled').length
 
-  function handleExportPDF() {
+  async function handleExportPDF() {
+    setSaving(true)
+    setSavedPath(null)
     const style = document.createElement('style')
-    style.textContent = `@media print { body * { visibility: hidden !important; } #report-printable, #report-printable * { visibility: visible !important; } #report-printable { position: fixed; top: 0; left: 0; width: 100%; } }`
+    style.textContent = [
+      '@media print {',
+      '  @page { margin: 12mm; size: A4 portrait; }',
+      '  body * { visibility: hidden !important; }',
+      '  #report-printable, #report-printable * { visibility: visible !important; }',
+      '  #report-printable { position: fixed; top: 0; left: 0; width: 100%; }',
+      '  .no-print { display: none !important; }',
+      '}',
+    ].join('\n')
     document.head.appendChild(style)
-    window.print()
-    setTimeout(() => document.head.removeChild(style), 1000)
+    try {
+      const result = await window.api.report.savePDF(orgName)
+      if (result?.path) {
+        setSavedPath(result.path)
+        setTimeout(() => setSavedPath(null), 5000)
+      }
+    } catch {}
+    finally {
+      document.head.removeChild(style)
+      setSaving(false)
+    }
   }
 
   return (
@@ -408,6 +444,9 @@ function ReportView({ orgName, tenantPolicies, date, logs }) {
           <span className="text-sm text-gray-400">&mdash; {tenantPolicies.length} policies</span>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {savedPath && (
+            <span className="text-xs text-emerald-600 font-medium">Saved to Documents</span>
+          )}
           {logs?.length > 0 && (
             <button
               onClick={() => setShowConsole(s => !s)}
@@ -419,11 +458,22 @@ function ReportView({ orgName, tenantPolicies, date, logs }) {
               {showConsole ? 'Hide log' : 'Show log'}
             </button>
           )}
-          <Button variant="secondary" onClick={handleExportPDF}>
-            <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-            </svg>
-            Export PDF
+          <Button variant="secondary" onClick={handleExportPDF} loading={saving}>
+            {savedPath ? (
+              <>
+                <svg className="w-4 h-4 mr-1.5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                Saved
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                </svg>
+                Save PDF
+              </>
+            )}
           </Button>
         </div>
       </div>
@@ -436,7 +486,8 @@ function ReportView({ orgName, tenantPolicies, date, logs }) {
       )}
 
       {/* Report content */}
-      <div id="report-printable" className="flex-1 overflow-y-auto px-6 py-5">
+      <div id="report-printable" className="flex-1 overflow-y-auto px-6 py-5"
+        style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>
         <AffinityReportHeader orgName={orgName} date={date} />
 
         {/* Stats */}
@@ -597,24 +648,11 @@ function ItGluePanel({ org, setOrg, credentials, setCredentials }) {
           )}
         </div>
       )}
-      {credentials && (
-        <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Tenant domain or ID <span className="font-normal text-gray-400 normal-case">(optional)</span></label>
-          <input
-            type="text"
-            value={credentials.tenantId || ''}
-            onChange={(e) => setCredentials(prev => ({ ...prev, tenantId: e.target.value.trim() }))}
-            placeholder="e.g. contoso.onmicrosoft.com"
-            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
-          />
-          <p className="text-xs text-gray-400 mt-1">Leave blank to sign in to your home tenant</p>
-        </div>
-      )}
     </div>
   )
 }
 
-function InteractivePanel({ org, setOrg, credentials, setCredentials }) {
+function InteractivePanel({ org, setOrg, setCredentials }) {
   useEffect(() => {
     setCredentials({ interactive: true, username: '', password: '', tenantId: '' })
   }, [])
@@ -630,17 +668,6 @@ function InteractivePanel({ org, setOrg, credentials, setCredentials }) {
           placeholder="e.g. AffinityIT"
           className="block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
         />
-      </div>
-      <div>
-        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Tenant domain or ID <span className="font-normal text-gray-400 normal-case">(optional)</span></label>
-        <input
-          type="text"
-          value={credentials?.tenantId || ''}
-          onChange={(e) => setCredentials(prev => ({ ...(prev || { interactive: true }), tenantId: e.target.value.trim() }))}
-          placeholder="e.g. contoso.onmicrosoft.com"
-          className="block w-full rounded-lg border border-gray-200 px-3 py-2 text-xs focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
-        />
-        <p className="text-xs text-gray-400 mt-1">Leave blank to sign in to your home tenant</p>
       </div>
       <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5">
         <p className="text-xs font-semibold text-blue-700 mb-0.5">Device code login</p>

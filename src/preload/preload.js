@@ -30,10 +30,11 @@ contextBridge.exposeInMainWorld('api', {
   // Policies
   policies: {
     list: (credentials, authMode) => ipcRenderer.invoke('policies:list', credentials, authMode),
+    disconnect: () => ipcRenderer.invoke('policies:disconnect'),
     create: (options) => ipcRenderer.invoke('policies:create', options),
-    update: (id, patch) => ipcRenderer.invoke('policies:update', id, patch),
-    delete: (id) => ipcRenderer.invoke('policies:delete', id),
-    toggleState: (id, state) => ipcRenderer.invoke('policies:toggleState', id, state),
+    update: (id, patch, tenantId) => ipcRenderer.invoke('policies:update', id, patch, tenantId),
+    delete: (id, tenantId) => ipcRenderer.invoke('policies:delete', id, tenantId),
+    toggleState: (id, state, tenantId) => ipcRenderer.invoke('policies:toggleState', id, state, tenantId),
   },
 
   // App
