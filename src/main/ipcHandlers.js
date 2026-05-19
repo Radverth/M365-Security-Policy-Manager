@@ -123,12 +123,11 @@ function registerIpcHandlers(win) {
       ? `-LoginHint '${credentials.username.replace(/'/g, "''")}'`
       : ''
 
-    // Device code flow works in all environments — WAM (the Windows broker) requires a
-    // parent HWND that cannot be provided from a console-less Electron subprocess.
-    const connectBlock = `
-Write-Output "Follow the device code prompt below..."
-Connect-MgGraph -UseDeviceAuthentication -Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome ${loginHint}
-Write-Output "Connected."`
+    // Always use device code flow — WAM (the Windows broker fallback) requires a
+    // parent window handle that is unavailable in a console-less subprocess.
+    // -ContextScope CurrentUser persists the MSAL token to disk so subsequent
+    // processes can reuse it silently (avoids "Session expired" on toggle/edit).
+    const connectArgs = `-UseDeviceAuthentication -ContextScope CurrentUser -Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome ${loginHint}`
 
     const script = `
 $ProgressPreference = 'SilentlyContinue'
@@ -139,16 +138,22 @@ if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
 Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
 Import-Module Microsoft.Graph.Identity.SignIns -ErrorAction SilentlyContinue
 try {
-  ${connectBlock}
-  Write-Output "Fetching policies..."
+  Write-Output "Connecting to Microsoft Graph..."
+  Connect-MgGraph ${connectArgs}
+  Write-Output "Connected. Fetching policies..."
   $policies = Get-MgIdentityConditionalAccessPolicy -All
   Write-Output "POLICY_JSON_START"
   $policies | ConvertTo-Json -Depth 10
   Write-Output "POLICY_JSON_END"
+  $mgCtx = Get-MgContext -ErrorAction SilentlyContinue
+  if ($mgCtx) {
+    Write-Output "CONTEXT_JSON_START"
+    @{ Account = $mgCtx.Account; TenantId = $mgCtx.TenantId } | ConvertTo-Json
+    Write-Output "CONTEXT_JSON_END"
+  }
+  Disconnect-MgGraph | Out-Null
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
-} finally {
-  try { Disconnect-MgGraph -ErrorAction SilentlyContinue } catch {}
 }
 `
     const lines = []
@@ -157,14 +162,20 @@ try {
       (line) => { lines.push(line); win.webContents.send('ps:output', line) },
       (line) => win.webContents.send('ps:error', line)
     )
+    let policies = []
+    let context = null
     try {
       const jsonBlock = output.match(/POLICY_JSON_START\r?\n([\s\S]*?)\r?\nPOLICY_JSON_END/)
       if (jsonBlock) {
         const parsed = JSON.parse(jsonBlock[1])
-        return Array.isArray(parsed) ? parsed : [parsed]
+        policies = Array.isArray(parsed) ? parsed : [parsed]
       }
     } catch {}
-    return []
+    try {
+      const ctxBlock = output.match(/CONTEXT_JSON_START\r?\n([\s\S]*?)\r?\nCONTEXT_JSON_END/)
+      if (ctxBlock) context = JSON.parse(ctxBlock[1])
+    } catch {}
+    return { policies, context }
   })
 
   ipcMain.handle('policies:create', async (_, options) => {
@@ -198,31 +209,41 @@ try {
 
   const safe = s => String(s || '').replace(/'/g, "''")
 
-  const MG_RECONNECT = `
-$ProgressPreference = 'SilentlyContinue'
+  const buildReconnect = (tenantId) => {
+    const tidFlag = tenantId ? `-TenantId '${safe(tenantId)}'` : ''
+    return `$ProgressPreference = 'SilentlyContinue'
 Import-Module Microsoft.Graph.Authentication -ErrorAction SilentlyContinue
 Import-Module Microsoft.Graph.Identity.SignIns -ErrorAction SilentlyContinue
 try {
-  Connect-MgGraph -Scopes 'Policy.ReadWrite.ConditionalAccess' -NoWelcome -Silent -ErrorAction Stop
+  Connect-MgGraph -Scopes 'Policy.ReadWrite.ConditionalAccess' -ContextScope CurrentUser -NoWelcome -Silent ${tidFlag} -ErrorAction Stop
 } catch {
   $errMsg = $_.Exception.Message
   if ($errMsg -match 'listener|window handle') {
     $mgCtx = Get-MgContext -ErrorAction SilentlyContinue
     if (-not $mgCtx) {
-      Write-Output "ERROR: Session expired - reload policies to sign in again."
+      Write-Output "ERROR: Session expired - please reload policies to reconnect."
       exit 1
     }
   } else {
-    Write-Output "ERROR: Session expired - reload policies to sign in again."
+    Write-Output "ERROR: Session expired - please reload policies to reconnect."
     exit 1
   }
 }`
+  }
 
-  ipcMain.handle('policies:update', async (_, id, patch) => {
+  ipcMain.handle('policies:disconnect', async () => {
+    const script = `Import-Module Microsoft.Graph.Authentication -ErrorAction SilentlyContinue
+try { Disconnect-MgGraph -ErrorAction SilentlyContinue } catch {}
+Write-Output "DISCONNECTED"`
+    await runScript(script, null, null)
+    return { success: true }
+  })
+
+  ipcMain.handle('policies:update', async (_, id, patch, tenantId) => {
     logger.info(`IPC: policies:update id=${id}`)
     const safeId = safe(id)
     const patchJson = JSON.stringify(patch)
-    const script = `${MG_RECONNECT}
+    const script = `${buildReconnect(tenantId)}
 try {
   $patchJson = @'
 ${patchJson}
@@ -244,10 +265,10 @@ ${patchJson}
     return { success: hasSuccess || exitCode === 0 }
   })
 
-  ipcMain.handle('policies:delete', async (_, id) => {
+  ipcMain.handle('policies:delete', async (_, id, tenantId) => {
     logger.info(`IPC: policies:delete id=${id}`)
     const safeId = safe(id)
-    const script = `${MG_RECONNECT}
+    const script = `${buildReconnect(tenantId)}
 try {
   Remove-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId '${safeId}' -Confirm:$false
   Write-Output "SUCCESS"
@@ -265,11 +286,11 @@ try {
     return { success: hasSuccess || exitCode === 0 }
   })
 
-  ipcMain.handle('policies:toggleState', async (_, id, state) => {
+  ipcMain.handle('policies:toggleState', async (_, id, state, tenantId) => {
     logger.info(`IPC: policies:toggleState id=${id} state=${state}`)
     const safeId = safe(id)
     const safeState = safe(state)
-    const script = `${MG_RECONNECT}
+    const script = `${buildReconnect(tenantId)}
 try {
   Invoke-MgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies/${safeId}" -Body (@{ state = '${safeState}' } | ConvertTo-Json) -ContentType 'application/json'
   Write-Output "SUCCESS"
@@ -291,9 +312,6 @@ try {
   ipcMain.handle('report:audit', async (_, options) => {
     const { credentials, authMode } = options || {}
     logger.info(`IPC: report:audit authMode=${authMode}`)
-
-
-
     const connectBlock = buildConnectGraph(credentials, authMode)
 
     const script = `

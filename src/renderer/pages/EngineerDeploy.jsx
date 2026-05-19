@@ -184,6 +184,19 @@ function AuthStep({ authMode, setAuthMode, org, setOrg, credentials, setCredenti
                   }
                 </div>
               )}
+              {credentials && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tenant domain or ID <span className="font-normal text-gray-500">(optional)</span></label>
+                  <input
+                    type="text"
+                    value={credentials.tenantId || ''}
+                    onChange={(e) => setCredentials(prev => ({ ...prev, tenantId: e.target.value.trim() }))}
+                    placeholder="e.g. contoso.onmicrosoft.com"
+                    className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Leave blank to sign in to your home tenant</p>
+                </div>
+              )}
             </>
           )}
         </>
@@ -200,6 +213,17 @@ function AuthStep({ authMode, setAuthMode, org, setOrg, credentials, setCredenti
               placeholder="e.g. AffinityIT"
               className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Tenant domain or ID <span className="font-normal text-gray-500">(optional)</span></label>
+            <input
+              type="text"
+              value={credentials?.tenantId || ''}
+              onChange={(e) => setCredentials(prev => ({ ...(prev || { interactive: true }), tenantId: e.target.value.trim() }))}
+              placeholder="e.g. contoso.onmicrosoft.com"
+              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
+            />
+            <p className="text-xs text-gray-400 mt-1">Leave blank to sign in to your home tenant</p>
           </div>
           <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
             A browser sign-in window will open when deployment starts. No credentials are stored in this application.

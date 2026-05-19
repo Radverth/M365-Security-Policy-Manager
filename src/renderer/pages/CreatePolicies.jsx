@@ -65,7 +65,7 @@ function AuthModeBanner({ mode, onChange, locked }) {
 // ── Step 1: Org & Credentials (content varies by auth mode) ──────────────────
 function StepOrgAndCredentials({ authMode, org, setOrg, credentials, setCredentials, useDeviceCode, setUseDeviceCode }) {
   if (authMode === 'itglue') return <StepItGlue org={org} setOrg={setOrg} credentials={credentials} setCredentials={setCredentials} />
-  if (authMode === 'interactive') return <StepInteractive org={org} setOrg={setOrg} setCredentials={setCredentials} useDeviceCode={useDeviceCode} setUseDeviceCode={setUseDeviceCode} />
+  if (authMode === 'interactive') return <StepInteractive org={org} setOrg={setOrg} credentials={credentials} setCredentials={setCredentials} useDeviceCode={useDeviceCode} setUseDeviceCode={setUseDeviceCode} />
   return null
 }
 
@@ -157,11 +157,24 @@ function StepItGlue({ org, setOrg, credentials, setCredentials }) {
           )}
         </div>
       )}
+      {credentials && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Tenant domain or ID <span className="font-normal text-gray-500">(optional)</span></label>
+          <input
+            type="text"
+            value={credentials.tenantId || ''}
+            onChange={(e) => setCredentials(prev => ({ ...prev, tenantId: e.target.value.trim() }))}
+            placeholder="e.g. contoso.onmicrosoft.com"
+            className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
+          />
+          <p className="text-xs text-gray-400 mt-1">Leave blank to sign in to your home tenant</p>
+        </div>
+      )}
     </div>
   )
 }
 
-function StepInteractive({ org, setOrg, setCredentials, useDeviceCode, setUseDeviceCode }) {
+function StepInteractive({ org, setOrg, credentials, setCredentials, useDeviceCode, setUseDeviceCode }) {
   useEffect(() => {
     // Signal interactive auth — no password needed
     setCredentials({ interactive: true, username: '', password: '', tenantId: '' })
@@ -178,6 +191,17 @@ function StepInteractive({ org, setOrg, setCredentials, useDeviceCode, setUseDev
           placeholder="e.g. AffinityIT"
           className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
         />
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Tenant domain or ID <span className="font-normal text-gray-500">(optional)</span></label>
+        <input
+          type="text"
+          value={credentials?.tenantId || ''}
+          onChange={(e) => setCredentials(prev => ({ ...(prev || { interactive: true }), tenantId: e.target.value.trim() }))}
+          placeholder="e.g. contoso.onmicrosoft.com"
+          className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
+        />
+        <p className="text-xs text-gray-400 mt-1">Leave blank to sign in to your home tenant</p>
       </div>
 
       <div className="flex items-start gap-3 p-4 border border-gray-200 rounded-lg">

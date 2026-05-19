@@ -3,8 +3,7 @@
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const PS_PREFS = `$ProgressPreference = 'SilentlyContinue'
-$VerbosePreference = 'SilentlyContinue'
-$InformationPreference = 'SilentlyContinue'`
+$VerbosePreference = 'SilentlyContinue'`
 
 function safe(s) { return (s || '').replace(/'/g, "''") }
 function psStr(s) { return `'${safe(s)}'` }
@@ -67,9 +66,9 @@ function buildConnectGraph(credentials, authMode, opts = {}) {
 
   if (authMode === 'interactive') {
     const tid = credentials?.tenantId ? `-TenantId '${safe(credentials.tenantId)}'` : ''
-    return `Write-Output "CONNECTING: Follow the device code prompt below..."
+    return `Write-Output "CONNECTING: Microsoft Graph - follow the device code prompt below..."
 try {
-    Connect-MgGraph ${tid} -UseDeviceAuthentication -Scopes ${scopes} -NoWelcome -ErrorAction Stop
+    Connect-MgGraph ${tid} -UseDeviceAuthentication -ContextScope CurrentUser -Scopes ${scopes} -NoWelcome -ErrorAction Stop
     Write-Output "CONNECTED: Microsoft Graph"
 } catch {
     $errMsg = $_.Exception.Message
@@ -97,7 +96,7 @@ try {
         Write-Output "INFO: Credential auth requires interactive sign-in - switching to device code flow..."
         $mgCred = $null; $mgPass = $null
         try {
-            Connect-MgGraph ${tid} -UseDeviceAuthentication -Scopes ${scopes} -NoWelcome -ErrorAction Stop
+            Connect-MgGraph ${tid} -UseDeviceAuthentication -ContextScope CurrentUser -Scopes ${scopes} -NoWelcome -ErrorAction Stop
             Write-Output "CONNECTED: Microsoft Graph"
         } catch {
             Write-Output "ERROR: Graph connect failed - $($_.Exception.Message)"; exit 1
@@ -893,8 +892,7 @@ function buildModuleImports(graph, exo, ipps) {
     `if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) { Write-Output "ERROR: Microsoft.Graph module not found - install it on the Modules page"; exit 1 }`,
     `Import-Module Microsoft.Graph.Authentication -ErrorAction Stop`,
     `Import-Module Microsoft.Graph.Identity.SignIns -ErrorAction SilentlyContinue`,
-    `Import-Module Microsoft.Graph.DeviceManagement -ErrorAction SilentlyContinue`,
-    `Import-Module Microsoft.Graph -ErrorAction SilentlyContinue`
+    `Import-Module Microsoft.Graph.DeviceManagement -ErrorAction SilentlyContinue`
   )
   if (exo) lines.push(
     `if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) { Write-Output "ERROR: ExchangeOnlineManagement module not found - install it on the Modules page"; exit 1 }`,

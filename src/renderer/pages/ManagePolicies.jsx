@@ -235,7 +235,7 @@ function ItGlueConnect({ credentials, setCredentials }) {
           ) : passwords.map((pw) => (
             <button
               key={pw.id}
-              onClick={() => { setSelectedPwId(pw.id); setCredentials({ username: pw.username, password: pw.password, tenantId: '' }) }}
+              onClick={() => { setSelectedPwId(pw.id); setCredentials({ username: pw.username, password: pw.password }) }}
               className={[
                 'w-full text-left px-3 py-2 rounded text-sm transition-colors',
                 selectedPwId === pw.id ? 'bg-navy text-white font-medium' : 'hover:bg-gray-50 text-gray-800',
@@ -273,7 +273,7 @@ export default function ManagePolicies() {
   const { addNotification } = useStore()
   const [authMode, setAuthMode] = useState('itglue')
   const [credentials, setCredentials] = useState(null)
-  const [connected, setConnected] = useState(false)
+  const [connectedAs, setConnectedAs] = useState(null)
   const [policies, setPolicies] = useState([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
@@ -297,7 +297,7 @@ export default function ManagePolicies() {
   const handleAuthModeChange = (mode) => {
     setAuthMode(mode)
     setCredentials(null)
-    setConnected(false)
+    setConnectedAs(null)
     setPolicies([])
   }
 
@@ -307,17 +307,27 @@ export default function ManagePolicies() {
     if (!window.api || !canLoad) return
     setLoading(true)
     setAuthLogs([])
+    setConnectedAs(null)
     try {
       const creds = authMode === 'interactive' ? { interactive: true } : credentials
       const result = await window.api.policies.list(creds, authMode)
-      setPolicies(Array.isArray(result) ? result : [])
+      const { policies: loadedPolicies = [], context = null } = result || {}
+      setPolicies(Array.isArray(loadedPolicies) ? loadedPolicies : [])
       setSelectedRows(new Set())
-      setConnected(true)
+      if (context) setConnectedAs(context)
     } catch (err) {
       addNotification('Failed to load policies: ' + err.message, 'error')
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleDisconnect = () => {
+    setConnectedAs(null)
+    setPolicies([])
+    setSelectedRows(new Set())
+    setAuthLogs([])
+    window.api?.policies?.disconnect?.().catch(() => {})
   }
 
   const filtered = policies.filter((p) => {
@@ -343,7 +353,7 @@ export default function ManagePolicies() {
     if (!window.api || !deleteTarget) return
     setDeleteLoading(true)
     try {
-      await window.api.policies.delete(deleteTarget.Id)
+      await window.api.policies.delete(deleteTarget.Id, connectedAs?.TenantId)
       setPolicies((ps) => ps.filter((p) => p.Id !== deleteTarget.Id))
       addNotification('Policy deleted', 'success')
     } catch (err) {
@@ -358,7 +368,7 @@ export default function ManagePolicies() {
     if (!window.api) return
     const newState = policy.State === 'enabled' ? 'disabled' : 'enabled'
     try {
-      await window.api.policies.toggleState(policy.Id, newState)
+      await window.api.policies.toggleState(policy.Id, newState, connectedAs?.TenantId)
       setPolicies((ps) => ps.map((p) => p.Id === policy.Id ? { ...p, State: newState } : p))
       addNotification(`Policy ${newState}`, 'success')
     } catch (err) {
@@ -372,11 +382,11 @@ export default function ManagePolicies() {
     const ids = [...selectedRows]
     try {
       if (bulkAction === 'delete') {
-        await Promise.all(ids.map((id) => window.api.policies.delete(id)))
+        await Promise.all(ids.map((id) => window.api.policies.delete(id, connectedAs?.TenantId)))
         setPolicies((ps) => ps.filter((p) => !selectedRows.has(p.Id)))
         addNotification(`${ids.length} policies deleted`, 'success')
       } else {
-        await Promise.all(ids.map((id) => window.api.policies.toggleState(id, bulkAction)))
+        await Promise.all(ids.map((id) => window.api.policies.toggleState(id, bulkAction, connectedAs?.TenantId)))
         setPolicies((ps) => ps.map((p) => selectedRows.has(p.Id) ? { ...p, State: bulkAction } : p))
         addNotification(`${ids.length} policies ${bulkAction}`, 'success')
       }
@@ -395,7 +405,7 @@ export default function ManagePolicies() {
     if (!window.api || !editTarget) return
     setSaveLoading(true)
     try {
-      await window.api.policies.update(editTarget.Id, patch)
+      await window.api.policies.update(editTarget.Id, patch, connectedAs?.TenantId)
       setPolicies(ps => ps.map(p => p.Id === editTarget.Id ? { ...p, ...patch } : p))
       addNotification('Policy updated', 'success')
       setEditTarget(null)
@@ -419,16 +429,31 @@ export default function ManagePolicies() {
           <h2 className="text-sm font-semibold text-gray-900">Tenant Connection</h2>
         </Card.Header>
         <Card.Body className="space-y-4">
-          <AuthModeSelector mode={authMode} onChange={handleAuthModeChange} />
-          {authMode === 'itglue'
-            ? <ItGlueConnect credentials={credentials} setCredentials={setCredentials} />
-            : <WamConnect />
-          }
-          <div className="flex justify-end">
-            <Button variant="primary" onClick={handleLoad} loading={loading} disabled={!canLoad}>
-              {connected ? 'Reload Policies' : 'Load Policies'}
-            </Button>
-          </div>
+          {connectedAs ? (
+            <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                <div>
+                  <p className="text-xs font-medium text-emerald-600 uppercase tracking-wide">Connected</p>
+                  <p className="text-sm font-semibold text-emerald-900">{connectedAs.Account}</p>
+                </div>
+              </div>
+              <Button size="sm" variant="secondary" onClick={handleDisconnect}>Switch Account</Button>
+            </div>
+          ) : (
+            <>
+              <AuthModeSelector mode={authMode} onChange={handleAuthModeChange} />
+              {authMode === 'itglue'
+                ? <ItGlueConnect credentials={credentials} setCredentials={setCredentials} />
+                : <WamConnect />
+              }
+              <div className="flex justify-end">
+                <Button variant="primary" onClick={handleLoad} loading={loading} disabled={!canLoad}>
+                  Load Policies
+                </Button>
+              </div>
+            </>
+          )}
           {loading && (
             <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
               <p className="font-medium mb-1">Authenticating…</p>
