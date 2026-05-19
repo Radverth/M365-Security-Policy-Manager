@@ -4,6 +4,7 @@ const { getModuleStatus, installModules, updateModules } = require('./moduleMana
 const itGlue = require('./itGlue')
 const { buildScript, buildConnectGraph } = require('./policyBuilder')
 const store = require('./store')
+const logger = require('./logger')
 const path = require('path')
 const { execFile } = require('child_process')
 const fs = require('fs')
@@ -17,9 +18,13 @@ function registerIpcHandlers(win) {
   // App
   ipcMain.handle('app:getVersion', () => app.getVersion())
   ipcMain.handle('app:openExternal', (_, url) => shell.openExternal(url))
+  ipcMain.handle('app:getLogDir', () => logger.getLogDir())
 
   // PowerShell check
-  ipcMain.handle('modules:checkPs', async () => checkPowerShell())
+  ipcMain.handle('modules:checkPs', async () => {
+    logger.info('IPC: modules:checkPs')
+    return checkPowerShell()
+  })
 
   // Module status
   ipcMain.handle('modules:getStatus', async () => {
@@ -32,6 +37,7 @@ function registerIpcHandlers(win) {
 
   // Module install
   ipcMain.handle('modules:install', async (_, moduleNames) => {
+    logger.info(`IPC: modules:install [${moduleNames.join(', ')}]`)
     const logs = []
     await installModules(
       moduleNames,
@@ -49,6 +55,7 @@ function registerIpcHandlers(win) {
 
   // Module update
   ipcMain.handle('modules:update', async (_, moduleNames) => {
+    logger.info(`IPC: modules:update [${moduleNames.join(', ')}]`)
     const logs = []
     await updateModules(
       moduleNames,
@@ -110,6 +117,7 @@ function registerIpcHandlers(win) {
 
   // Policies
   ipcMain.handle('policies:list', async (_, credentials, authMode) => {
+    logger.info(`IPC: policies:list authMode=${authMode} hasUser=${!!(credentials?.username)}`)
     const loginHint = (authMode !== 'interactive' && credentials?.username)
       ? `-LoginHint '${credentials.username.replace(/'/g, "''")}'`
       : ''
@@ -156,6 +164,7 @@ try {
 
   ipcMain.handle('policies:create', async (_, options) => {
     const { policies, credentials, prefix, authMode, policyConfigs, useDeviceCode } = options
+    logger.info(`IPC: policies:create count=${policies?.length} authMode=${authMode} prefix=${prefix}`)
     const script = buildScript(policies, credentials, prefix, authMode, policyConfigs || {}, { useDeviceCode })
     const logs = []
     const results = {}
@@ -196,6 +205,7 @@ try {
 }`
 
   ipcMain.handle('policies:update', async (_, id, patch) => {
+    logger.info(`IPC: policies:update id=${id}`)
     const safeId = safe(id)
     const patchJson = JSON.stringify(patch)
     const script = `${MG_RECONNECT}
@@ -221,6 +231,7 @@ ${patchJson}
   })
 
   ipcMain.handle('policies:delete', async (_, id) => {
+    logger.info(`IPC: policies:delete id=${id}`)
     const safeId = safe(id)
     const script = `${MG_RECONNECT}
 try {
@@ -241,6 +252,7 @@ try {
   })
 
   ipcMain.handle('policies:toggleState', async (_, id, state) => {
+    logger.info(`IPC: policies:toggleState id=${id} state=${state}`)
     const safeId = safe(id)
     const safeState = safe(state)
     const script = `${MG_RECONNECT}
@@ -264,6 +276,7 @@ try {
   // Report: audit CA policies
   ipcMain.handle('report:audit', async (_, options) => {
     const { credentials, authMode } = options || {}
+    logger.info(`IPC: report:audit authMode=${authMode}`)
     const connectBlock = buildConnectGraph(credentials, authMode)
 
     const script = `

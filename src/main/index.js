@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu } = require('electron')
 const path = require('path')
 const { registerIpcHandlers } = require('./ipcHandlers')
 const { setupAutoUpdater } = require('./autoUpdater')
+const logger = require('./logger')
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
@@ -37,6 +38,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  logger.info(`App started v${app.getVersion()} platform=${process.platform}`)
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

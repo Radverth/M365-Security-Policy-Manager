@@ -3,6 +3,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const store = require('./store')
+const logger = require('./logger')
 
 function getPwshPath() {
   const configured = store.get('powershellPath')
@@ -113,6 +114,7 @@ function runScript(script, onData, onError) {
         const line = stripCtrl(raw).trimEnd()
         if (line.trim()) {
           allOutput.push(line)
+          logger.ps(line)
           if (onData) onData(line)
         }
       })
@@ -126,6 +128,7 @@ function runScript(script, onData, onError) {
       parts.forEach((raw) => {
         const line = stripCtrl(raw).trimEnd()
         if (line.trim()) {
+          logger.psErr(line)
           if (onError) onError(line)
         }
       })
@@ -139,12 +142,13 @@ function runScript(script, onData, onError) {
       // flush any remaining buffered content
       if (stdoutBuf.trim()) {
         const line = stripCtrl(stdoutBuf).trimEnd()
-        if (line.trim()) { allOutput.push(line); if (onData) onData(line) }
+        if (line.trim()) { allOutput.push(line); logger.ps(line); if (onData) onData(line) }
       }
       if (stderrBuf.trim()) {
         const line = stripCtrl(stderrBuf).trimEnd()
-        if (line.trim() && onError) onError(line)
+        if (line.trim()) { logger.psErr(line); if (onError) onError(line) }
       }
+      logger.info(`PS exited with code ${code}`)
       cleanup()
       resolve({ exitCode: code, output: allOutput.join('\n') })
     })

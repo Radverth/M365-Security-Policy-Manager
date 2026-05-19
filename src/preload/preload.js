@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // Policies
   policies: {
-    list: (credentials) => ipcRenderer.invoke('policies:list', credentials),
+    list: (credentials, authMode) => ipcRenderer.invoke('policies:list', credentials, authMode),
     create: (options) => ipcRenderer.invoke('policies:create', options),
     update: (id, patch) => ipcRenderer.invoke('policies:update', id, patch),
     delete: (id) => ipcRenderer.invoke('policies:delete', id),
@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('api', {
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
+    getLogDir: () => ipcRenderer.invoke('app:getLogDir'),
   },
 
   // Auto-updater
