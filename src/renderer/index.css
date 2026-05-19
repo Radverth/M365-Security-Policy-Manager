@@ -17,24 +17,77 @@
 @layer components {
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 rounded-md bg-navy text-white font-medium
-           px-4 py-2 text-sm transition-colors hover:bg-navy-600 focus:outline-none focus:ring-2
+           px-4 py-2 text-sm transition-all hover:bg-navy-600 active:scale-95 focus:outline-none focus:ring-2
            focus:ring-navy focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .btn-secondary {
     @apply inline-flex items-center justify-center gap-2 rounded-md border border-gray-300 bg-white
-           text-gray-700 font-medium px-4 py-2 text-sm transition-colors hover:bg-gray-50
+           text-gray-700 font-medium px-4 py-2 text-sm transition-all hover:bg-gray-50 active:scale-95
            focus:outline-none focus:ring-2 focus:ring-navy focus:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-2 rounded-md text-gray-600 font-medium
-           px-4 py-2 text-sm transition-colors hover:bg-gray-100 hover:text-gray-900
+           px-4 py-2 text-sm transition-all hover:bg-gray-100 hover:text-gray-900 active:scale-95
            focus:outline-none focus:ring-2 focus:ring-navy focus:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .btn-danger {
     @apply inline-flex items-center justify-center gap-2 rounded-md bg-red-600 text-white font-medium
-           px-4 py-2 text-sm transition-colors hover:bg-red-700 focus:outline-none focus:ring-2
+           px-4 py-2 text-sm transition-all hover:bg-red-700 active:scale-95 focus:outline-none focus:ring-2
            focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+}
+
+/* ── Keyframe animations ─────────────────────────────────────────────────── */
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(110%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slide-out-right {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(110%); }
+}
+
+@keyframes progress-shrink {
+  from { width: 100%; }
+  to   { width: 0%; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@layer utilities {
+  .animate-fade-in-up {
+    animation: fade-in-up 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .animate-fade-in {
+    animation: fade-in 0.2s ease-out both;
+  }
+  .animate-slide-in-right {
+    animation: slide-in-right 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .animate-slide-out-right {
+    animation: slide-out-right 0.2s ease-in both;
+  }
+  .skeleton {
+    background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+    border-radius: 4px;
   }
 }

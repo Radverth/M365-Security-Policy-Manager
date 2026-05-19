@@ -31,9 +31,9 @@ export default function Button({
       onClick={onClick}
       disabled={disabled || loading}
       className={[
-        'inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors',
+        'inline-flex items-center justify-center gap-2 rounded-md font-medium transition-all',
         'focus:outline-none focus:ring-2 focus:ring-offset-2',
-        'disabled:opacity-50 disabled:cursor-not-allowed',
+        'disabled:opacity-50 disabled:cursor-not-allowed active:scale-95',
         sizeClasses[size] || sizeClasses.md,
         variantClasses[variant] || variantClasses.primary,
         className,

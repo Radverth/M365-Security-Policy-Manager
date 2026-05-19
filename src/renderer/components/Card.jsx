@@ -6,7 +6,7 @@ export default function Card({ children, className = '', onClick, hoverable = fa
       onClick={onClick}
       className={[
         'bg-white rounded-lg border border-gray-200 shadow-sm',
-        hoverable ? 'cursor-pointer hover:shadow-md hover:border-navy-200 transition-all' : '',
+        hoverable ? 'cursor-pointer hover:shadow-lg hover:-translate-y-0.5 hover:border-navy-200 transition-all duration-200' : 'transition-shadow duration-200',
         className,
       ].join(' ')}
     >
