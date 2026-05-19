@@ -67,17 +67,6 @@ function buildConnectGraph(credentials, authMode, opts = {}) {
 
   if (authMode === 'interactive') {
     const tid = credentials?.tenantId ? `-TenantId '${safe(credentials.tenantId)}'` : ''
-    // On Windows the caller runs WAM in a visible PS window first; reuse the cached token silently.
-    // On Linux/Mac WAM is unavailable so fall back to device code.
-    if (process.platform === 'win32') {
-      return `Write-Output "CONNECTING: Microsoft Graph..."
-try {
-    Connect-MgGraph ${tid} -Scopes ${scopes} -NoWelcome -Silent -ErrorAction Stop
-    Write-Output "CONNECTED: Microsoft Graph"
-} catch {
-    Write-Output "ERROR: Graph connect failed - $($_.Exception.Message)"; exit 1
-}`
-    }
     return `Write-Output "CONNECTING: Follow the device code prompt below..."
 try {
     Connect-MgGraph ${tid} -UseDeviceAuthentication -Scopes ${scopes} -NoWelcome -ErrorAction Stop
