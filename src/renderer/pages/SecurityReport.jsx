@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import useStore from '../store'
 import Button from '../components/Button'
-import DeviceCodeModal, { parseDeviceCode } from '../components/DeviceCodeModal'
 
 // ── Data helpers ──────────────────────────────────────────────────────────────
 
@@ -522,155 +521,6 @@ function ReportView({ orgName, tenantPolicies, date, logs }) {
   )
 }
 
-// ── Auth panel ────────────────────────────────────────────────────────────────
-
-function ItGluePanel({ org, setOrg, credentials, setCredentials }) {
-  const { orgs, orgsLoading, loadOrgs, settings } = useStore()
-  const [passwords, setPasswords] = useState([])
-  const [allPasswords, setAllPasswords] = useState([])
-  const [pwLoading, setPwLoading] = useState(false)
-  const [search, setSearch] = useState('')
-  const [selectedPwId, setSelectedPwId] = useState(null)
-
-  useEffect(() => { if (settings.itGlueApiKey) loadOrgs() }, [])
-
-  useEffect(() => {
-    if (!org || org.id === 'manual' || !window.api) return
-    setPwLoading(true)
-    window.api.itglue.getPasswords(org.id)
-      .then((res) => {
-        const all = res || []
-        setAllPasswords(all)
-        const exclusionWords = ['recovery', 'break glass', 'breakglass', 'emergency', 'backup']
-        setPasswords(all.filter((pw) => {
-          const n = pw.name.toLowerCase()
-          return (n.includes('365') || n.includes('global admin') || n.includes('globaladmin'))
-            && !exclusionWords.some(ex => n.includes(ex))
-        }))
-      })
-      .catch(() => { setPasswords([]); setAllPasswords([]) })
-      .finally(() => setPwLoading(false))
-  }, [org?.id])
-
-  if (!settings.itGlueApiKey) {
-    return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-        <p className="text-xs font-semibold text-amber-800 mb-0.5">IT Glue not configured</p>
-        <p className="text-xs text-amber-700">Add your IT Glue API key in Settings.</p>
-      </div>
-    )
-  }
-
-  const filteredOrgs = orgs.filter(o =>
-    o.name.toLowerCase().includes(search.toLowerCase()) ||
-    (o.shortName || '').toLowerCase().includes(search.toLowerCase())
-  )
-  const hiddenCount = allPasswords.length - passwords.length
-
-  return (
-    <div className="space-y-4">
-      {/* Org search */}
-      <div>
-        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Organisation</label>
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search organisations..."
-          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
-        />
-        <div className="mt-1.5 max-h-36 overflow-y-auto space-y-1">
-          {orgsLoading ? (
-            Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-8 bg-gray-100 rounded-lg animate-pulse" />
-            ))
-          ) : filteredOrgs.length === 0 ? (
-            <p className="text-xs text-gray-400 py-2 text-center">No organisations found</p>
-          ) : filteredOrgs.map(o => (
-            <button
-              key={o.id}
-              onClick={() => { setOrg(o); setCredentials(null); setSelectedPwId(null) }}
-              className={[
-                'w-full flex items-center justify-between px-3 py-2 rounded-lg border text-left text-xs transition-all',
-                org?.id === o.id
-                  ? 'border-navy bg-navy text-white font-medium'
-                  : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-gray-700',
-              ].join(' ')}
-            >
-              <span>{o.name}</span>
-              {o.shortName && <span className="opacity-60 text-xs">{o.shortName}</span>}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Credential picker */}
-      {org && (
-        <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Credential</label>
-          {pwLoading ? (
-            Array.from({ length: 2 }).map((_, i) => (
-              <div key={i} className="h-10 bg-gray-100 rounded-lg animate-pulse mb-1" />
-            ))
-          ) : passwords.length === 0 ? (
-            <p className="text-xs text-gray-400 py-2 text-center">No 365 / Global Admin credentials found</p>
-          ) : (
-            <div className="max-h-36 overflow-y-auto space-y-1">
-              {passwords.map(pw => (
-                <button
-                  key={pw.id}
-                  onClick={() => { setSelectedPwId(pw.id); setCredentials({ username: pw.username, password: pw.password, tenantId: '' }) }}
-                  className={[
-                    'w-full px-3 py-2 rounded-lg border text-left text-xs transition-all',
-                    selectedPwId === pw.id
-                      ? 'border-navy bg-navy text-white font-medium'
-                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50',
-                  ].join(' ')}
-                >
-                  <p className={`font-medium ${selectedPwId === pw.id ? 'text-white' : 'text-gray-800'}`}>{pw.name}</p>
-                  <p className={`mt-0.5 ${selectedPwId === pw.id ? 'text-white/70' : 'text-gray-500'}`}>{pw.username}</p>
-                </button>
-              ))}
-            </div>
-          )}
-          {hiddenCount > 0 && (
-            <p className="mt-1.5 text-xs text-gray-400 italic">
-              {hiddenCount} password{hiddenCount !== 1 ? 's' : ''} hidden (recovery / break-glass)
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function InteractivePanel({ org, setOrg, setCredentials }) {
-  useEffect(() => {
-    setCredentials({ interactive: true, username: '', password: '', tenantId: '' })
-  }, [])
-
-  return (
-    <div className="space-y-3">
-      <div>
-        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Organisation name</label>
-        <input
-          type="text"
-          value={org?.name || ''}
-          onChange={e => setOrg({ id: 'manual', name: e.target.value, shortName: '' })}
-          placeholder="e.g. AffinityIT"
-          className="block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
-        />
-      </div>
-      <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5">
-        <p className="text-xs font-semibold text-blue-700 mb-0.5">Device code login</p>
-        <p className="text-xs text-blue-600 leading-relaxed">
-          A device code will appear in the output. Visit <span className="font-medium">microsoft.com/devicelogin</span> and enter it to authenticate.
-        </p>
-      </div>
-    </div>
-  )
-}
-
 // ── Empty state ───────────────────────────────────────────────────────────────
 
 function EmptyState() {
@@ -692,29 +542,23 @@ function EmptyState() {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function SecurityReport() {
-  const [authMode, setAuthMode] = useState('itglue')
-  const [org, setOrg] = useState(null)
-  const [credentials, setCredentials] = useState(null)
+  const { tenantSession, openConnectModal } = useStore()
+  const [orgName, setOrgName] = useState('')
   const [status, setStatus] = useState('idle')
   const [logs, setLogs] = useState([])
   const [report, setReport] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
-  const [deviceCodeInfo, setDeviceCodeInfo] = useState(null)
 
-  const canGenerate = useCallback(() => {
-    if (!org?.name) return false
-    if (authMode === 'itglue' && !credentials) return false
-    return true
-  }, [org, authMode, credentials])
-
-  function handleAuthModeChange(mode) {
-    setAuthMode(mode)
-    setCredentials(null)
-    if (mode === 'interactive') setOrg(prev => prev?.id === 'manual' ? prev : null)
-  }
+  // Derive default org name from tenant session email domain
+  useEffect(() => {
+    if (tenantSession?.Account && !orgName) {
+      const domain = tenantSession.Account.split('@')[1]?.split('.')[0] || ''
+      setOrgName(domain)
+    }
+  }, [tenantSession])
 
   async function handleGenerate() {
-    if (!canGenerate()) return
+    if (!tenantSession) return
     setStatus('running')
     setLogs([])
     setReport(null)
@@ -722,16 +566,10 @@ export default function SecurityReport() {
 
     const unsub = window.api?.onPsOutput?.((line) => {
       setLogs(prev => [...prev, line])
-      const dc = parseDeviceCode(line)
-      if (dc) setDeviceCodeInfo(dc)
-      if (/connected\.|CONNECTED:|welcome to microsoft graph/i.test(line)) setDeviceCodeInfo(null)
     })
 
     try {
-      const result = await window.api.report.audit({
-        credentials,
-        authMode,
-      })
+      const result = await window.api.report.audit()
 
       if (result.error) {
         setErrorMsg(result.error)
@@ -739,7 +577,7 @@ export default function SecurityReport() {
       } else {
         setReport({
           policies: result.policies,
-          orgName: org?.name || '',
+          orgName: orgName || tenantSession?.Account || '',
           date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }),
         })
         setStatus('done')
@@ -748,7 +586,6 @@ export default function SecurityReport() {
       setErrorMsg(err.message || 'Unknown error')
       setStatus('error')
     } finally {
-      setDeviceCodeInfo(null)
       unsub?.()
     }
   }
@@ -763,33 +600,43 @@ export default function SecurityReport() {
         {/* Header */}
         <div className="px-5 py-4 border-b border-gray-100">
           <h2 className="text-sm font-bold text-gray-800">Security Report</h2>
-          <p className="text-xs text-gray-400 mt-0.5">Full CA policy inventory for any tenant</p>
+          <p className="text-xs text-gray-400 mt-0.5">Full CA policy inventory for the connected tenant</p>
         </div>
 
-        {/* Auth mode tabs */}
-        <div className="px-5 pt-4">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Authentication</p>
-          <div className="flex gap-1.5 p-1 bg-gray-100 rounded-lg mb-4">
-            {[{ id: 'itglue', label: 'IT Glue' }, { id: 'interactive', label: 'Interactive' }].map((m) => (
-              <button
-                key={m.id}
-                onClick={() => handleAuthModeChange(m.id)}
-                className={[
-                  'flex-1 py-1.5 px-2 rounded-md text-xs font-semibold transition-all',
-                  authMode === m.id
-                    ? 'bg-white text-navy shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700',
-                ].join(' ')}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
+        <div className="px-5 pt-4 space-y-4">
+          {tenantSession ? (
+            <>
+              {/* Connected tenant info */}
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                  <p className="text-xs font-semibold text-emerald-700">Connected</p>
+                </div>
+                <p className="text-xs text-emerald-800 truncate pl-3.5">{tenantSession.Account}</p>
+              </div>
 
-          {authMode === 'itglue' ? (
-            <ItGluePanel org={org} setOrg={setOrg} credentials={credentials} setCredentials={setCredentials} />
+              {/* Org name for report */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Report label (org name)</label>
+                <input
+                  type="text"
+                  value={orgName}
+                  onChange={e => setOrgName(e.target.value)}
+                  placeholder="e.g. Contoso"
+                  className="block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
+                />
+              </div>
+            </>
           ) : (
-            <InteractivePanel org={org} setOrg={setOrg} credentials={credentials} setCredentials={setCredentials} />
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-center space-y-3">
+              <p className="text-xs text-gray-500">Connect a tenant to generate a security report.</p>
+              <button
+                onClick={openConnectModal}
+                className="w-full py-1.5 rounded-md bg-navy text-white text-xs font-semibold hover:bg-navy/90 transition-colors"
+              >
+                Connect Tenant
+              </button>
+            </div>
           )}
         </div>
 
@@ -807,7 +654,7 @@ export default function SecurityReport() {
           <Button
             variant="primary"
             className="w-full"
-            disabled={!canGenerate() || isRunning}
+            disabled={!tenantSession || isRunning}
             onClick={handleGenerate}
           >
             {isRunning ? (
@@ -826,7 +673,7 @@ export default function SecurityReport() {
       {/* ── Right area ── */}
       <main className="flex-1 overflow-hidden bg-gray-50">
         {isRunning ? (
-          <LiveConsole lines={logs} status="running" orgName={org?.name} />
+          <LiveConsole lines={logs} status="running" orgName={orgName || tenantSession?.Account} />
         ) : isDone ? (
           <ReportView
             orgName={report.orgName}
@@ -838,8 +685,6 @@ export default function SecurityReport() {
           <EmptyState />
         )}
       </main>
-
-      <DeviceCodeModal info={deviceCodeInfo} onDismiss={() => setDeviceCodeInfo(null)} />
     </div>
   )
 }

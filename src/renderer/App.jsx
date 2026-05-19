@@ -4,6 +4,7 @@ import useStore from './store'
 import Modal from './components/Modal'
 import Button from './components/Button'
 import StatusIndicator from './components/StatusIndicator'
+import DeviceCodeModal, { parseDeviceCode } from './components/DeviceCodeModal'
 
 import Dashboard from './pages/Dashboard'
 import CreatePolicies from './pages/CreatePolicies'
@@ -48,8 +49,45 @@ function NavItem({ to, icon, label, end }) {
   )
 }
 
+function TenantWidget({ session, onConnect, onSwitch }) {
+  if (!session) {
+    return (
+      <div className="px-3 mb-3">
+        <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-2 h-2 rounded-full bg-white/25 flex-shrink-0" />
+            <span className="text-xs text-white/40">No tenant connected</span>
+          </div>
+          <button
+            onClick={onConnect}
+            className="w-full py-1.5 rounded-md bg-gold/20 border border-gold/30 text-gold text-xs font-semibold hover:bg-gold/30 transition-colors"
+          >
+            Connect Tenant
+          </button>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="px-3 mb-3">
+      <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0 animate-pulse" />
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-white truncate">{session.Account}</p>
+              <p className="text-xs text-white/35 truncate">Connected</p>
+            </div>
+          </div>
+          <button onClick={onSwitch} className="text-xs text-gold/70 hover:text-gold transition-colors flex-shrink-0 font-medium">Switch</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function Sidebar({ modules, psStatus }) {
-  const { updateInfo, updaterStatus, showUpdater } = useStore()
+  const { updateInfo, updaterStatus, showUpdater, tenantSession, openConnectModal } = useStore()
   const installed = modules.filter((m) => m.Status === 'up_to_date').length
   const total = modules.length
   const healthStatus = !psStatus?.found
@@ -122,53 +160,62 @@ function Sidebar({ modules, psStatus }) {
       </nav>
 
       {/* Footer */}
-      <div className="px-4 py-4 border-t border-white/10 space-y-3">
-        {/* Update banner */}
-        {(updateInfo?.hasUpdate || updaterStatus === 'downloaded') && (
-          <button
-            onClick={showUpdater}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gold/20 border border-gold/40 hover:bg-gold/30 active:scale-95 transition-all text-left"
-          >
-            <svg className="w-3.5 h-3.5 text-gold flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-gold leading-tight">
-                {updaterStatus === 'downloaded' ? 'Ready to install' : 'Update available'}
-              </p>
-              <p className="text-xs text-gold/70 leading-tight">v{updateInfo?.latestVersion} — click to update</p>
-            </div>
-          </button>
-        )}
+      <div className="px-0 py-4 border-t border-white/10 space-y-3">
+        {/* Tenant widget */}
+        <TenantWidget
+          session={tenantSession}
+          onConnect={openConnectModal}
+          onSwitch={openConnectModal}
+        />
 
-        {/* Module health bar */}
-        {total > 0 && (
-          <div className="px-1 space-y-1.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <StatusIndicator status={healthStatus} showLabel={false} />
-                <span className="text-xs text-white/60">
-                  {!psStatus ? 'Checking…' : !psStatus.found ? 'PowerShell not found' : `${installed}/${total} modules ready`}
-                </span>
+        <div className="px-4 space-y-3">
+          {/* Update banner */}
+          {(updateInfo?.hasUpdate || updaterStatus === 'downloaded') && (
+            <button
+              onClick={showUpdater}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gold/20 border border-gold/40 hover:bg-gold/30 active:scale-95 transition-all text-left"
+            >
+              <svg className="w-3.5 h-3.5 text-gold flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-gold leading-tight">
+                  {updaterStatus === 'downloaded' ? 'Ready to install' : 'Update available'}
+                </p>
+                <p className="text-xs text-gold/70 leading-tight">v{updateInfo?.latestVersion} — click to update</p>
               </div>
-              {total > 0 && psStatus?.found && (
-                <span className="text-xs font-medium" style={{ color: healthColor }}>{healthPct}%</span>
+            </button>
+          )}
+
+          {/* Module health bar */}
+          {total > 0 && (
+            <div className="px-1 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <StatusIndicator status={healthStatus} showLabel={false} />
+                  <span className="text-xs text-white/60">
+                    {!psStatus ? 'Checking…' : !psStatus.found ? 'PowerShell not found' : `${installed}/${total} modules ready`}
+                  </span>
+                </div>
+                {total > 0 && psStatus?.found && (
+                  <span className="text-xs font-medium" style={{ color: healthColor }}>{healthPct}%</span>
+                )}
+              </div>
+              {psStatus?.found && total > 0 && (
+                <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-700"
+                    style={{ width: `${healthPct}%`, backgroundColor: healthColor }}
+                  />
+                </div>
               )}
             </div>
-            {psStatus?.found && total > 0 && (
-              <div className="h-1 rounded-full bg-white/10 overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-700"
-                  style={{ width: `${healthPct}%`, backgroundColor: healthColor }}
-                />
-              </div>
-            )}
-          </div>
-        )}
+          )}
 
-        <div className="flex items-center justify-between px-1">
-          <span className="text-xs text-white/30">v{VERSION}</span>
-          <span className="text-xs text-white/30">M365 Policy Mgr</span>
+          <div className="flex items-center justify-between px-1">
+            <span className="text-xs text-white/30">v{VERSION}</span>
+            <span className="text-xs text-white/30">M365 Policy Mgr</span>
+          </div>
         </div>
       </div>
     </aside>
@@ -329,21 +376,235 @@ function FirstRunModal() {
   )
 }
 
+// ── Connect Modal ─────────────────────────────────────────────────────────────
+
+function ItGlueConnectPanel({ credentials, setCredentials }) {
+  const { orgs, orgsLoading, loadOrgs, settings } = useStore()
+  const [selectedOrg, setSelectedOrg] = useState(null)
+  const [passwords, setPasswords] = useState([])
+  const [pwLoading, setPwLoading] = useState(false)
+  const [selectedPwId, setSelectedPwId] = useState(null)
+
+  useEffect(() => {
+    if (settings.itGlueApiKey) loadOrgs()
+  }, [])
+
+  useEffect(() => {
+    if (!selectedOrg || !window.api) return
+    setPwLoading(true)
+    setCredentials(null)
+    setSelectedPwId(null)
+    window.api.itglue.getPasswords(selectedOrg.id)
+      .then((res) => setPasswords(res || []))
+      .catch(() => setPasswords([]))
+      .finally(() => setPwLoading(false))
+  }, [selectedOrg?.id])
+
+  if (!settings.itGlueApiKey) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+        IT Glue API key not configured. Go to Settings to add your key, or use Interactive mode.
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      <div>
+        <p className="text-xs font-medium text-gray-600 mb-1.5">Organisation</p>
+        <div className="max-h-40 overflow-y-auto space-y-1 border border-gray-200 rounded-lg p-1">
+          {orgsLoading ? (
+            Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-9 bg-gray-100 rounded animate-pulse" />)
+          ) : orgs.length === 0 ? (
+            <p className="text-xs text-gray-400 p-3 text-center">No organisations found</p>
+          ) : orgs.map((o) => (
+            <button
+              key={o.id}
+              onClick={() => setSelectedOrg(o)}
+              className={[
+                'w-full text-left px-3 py-2 rounded text-sm transition-colors',
+                selectedOrg?.id === o.id ? 'bg-navy text-white font-medium' : 'hover:bg-gray-50 text-gray-800',
+              ].join(' ')}
+            >
+              {o.name}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <p className="text-xs font-medium text-gray-600 mb-1.5">Credential</p>
+        <div className="max-h-40 overflow-y-auto space-y-1 border border-gray-200 rounded-lg p-1">
+          {!selectedOrg ? (
+            <p className="text-xs text-gray-400 p-3 text-center">Select an organisation first</p>
+          ) : pwLoading ? (
+            Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-9 bg-gray-100 rounded animate-pulse" />)
+          ) : passwords.length === 0 ? (
+            <p className="text-xs text-gray-400 p-3 text-center">No passwords found</p>
+          ) : passwords.map((pw) => (
+            <button
+              key={pw.id}
+              onClick={() => { setSelectedPwId(pw.id); setCredentials({ username: pw.username, password: pw.password }) }}
+              className={[
+                'w-full text-left px-3 py-2 rounded text-sm transition-colors',
+                selectedPwId === pw.id ? 'bg-navy text-white font-medium' : 'hover:bg-gray-50 text-gray-800',
+              ].join(' ')}
+            >
+              <p className="font-medium truncate">{pw.name}</p>
+              <p className={`text-xs truncate ${credentials?.username === pw.username ? 'text-white/70' : 'text-gray-400'}`}>{pw.username}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ConnectModal() {
+  const { connectModalOpen, closeConnectModal, setTenantSession } = useStore()
+  const [authMode, setAuthMode] = useState('itglue')
+  const [credentials, setCredentials] = useState(null)
+  const [username, setUsername] = useState('')
+  const [connecting, setConnecting] = useState(false)
+  const [error, setError] = useState('')
+  const [deviceCodeInfo, setDeviceCodeInfo] = useState(null)
+
+  useEffect(() => {
+    if (!connectModalOpen) {
+      setConnecting(false)
+      setError('')
+      setDeviceCodeInfo(null)
+      setCredentials(null)
+      setUsername('')
+    }
+  }, [connectModalOpen])
+
+  useEffect(() => {
+    if (!window.api || !connectModalOpen) return
+    const unsub = window.api.onPsOutput((line) => {
+      const dc = parseDeviceCode(line)
+      if (dc) setDeviceCodeInfo(dc)
+      if (/connected\.|CONNECTED:|welcome to microsoft graph/i.test(line)) setDeviceCodeInfo(null)
+    })
+    return () => unsub?.()
+  }, [connectModalOpen])
+
+  const canConnect = authMode === 'interactive' || !!(credentials?.username && credentials?.password)
+
+  const handleConnect = async () => {
+    setConnecting(true)
+    setError('')
+    try {
+      const creds = authMode === 'interactive'
+        ? (username ? { username } : null)
+        : credentials
+      const result = await window.api.session.connect(creds, authMode)
+      if (result.error) {
+        setError(result.error)
+      } else {
+        setTenantSession(result.context)
+        closeConnectModal()
+      }
+    } catch (err) {
+      setError(err.message || 'Connection failed')
+    } finally {
+      setConnecting(false)
+      setDeviceCodeInfo(null)
+    }
+  }
+
+  if (!connectModalOpen) return null
+
+  return (
+    <>
+      <Modal
+        open={connectModalOpen}
+        onClose={closeConnectModal}
+        title="Connect to Tenant"
+        size="lg"
+      >
+        <div className="space-y-4 py-2">
+          {/* Auth mode tabs */}
+          <div className="flex gap-1 p-1 bg-gray-100 rounded-lg">
+            {[{ id: 'itglue', label: 'IT Glue' }, { id: 'interactive', label: 'Interactive' }].map((m) => (
+              <button
+                key={m.id}
+                onClick={() => { setAuthMode(m.id); setCredentials(null); setError('') }}
+                className={[
+                  'flex-1 py-1.5 px-2 rounded-md text-xs font-semibold transition-all',
+                  authMode === m.id ? 'bg-white text-navy shadow-sm' : 'text-gray-500 hover:text-gray-700',
+                ].join(' ')}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {authMode === 'itglue' ? (
+            <ItGlueConnectPanel credentials={credentials} setCredentials={setCredentials} />
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Username (optional)</label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  placeholder="admin@contoso.onmicrosoft.com"
+                  className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
+                />
+              </div>
+              <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5">
+                <p className="text-xs font-semibold text-blue-700 mb-0.5">Device code sign-in</p>
+                <p className="text-xs text-blue-600 leading-relaxed">
+                  A device code will appear. Visit <span className="font-medium">microsoft.com/devicelogin</span> and enter it to authenticate.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5">
+              <p className="text-xs font-semibold text-red-700 mb-0.5">Connection failed</p>
+              <p className="text-xs text-red-600 break-words">{error}</p>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="secondary" onClick={closeConnectModal} disabled={connecting}>Cancel</Button>
+            <Button
+              variant="primary"
+              onClick={handleConnect}
+              loading={connecting}
+              disabled={!canConnect || connecting}
+            >
+              {connecting ? 'Connecting…' : 'Connect'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+      <DeviceCodeModal info={deviceCodeInfo} onDismiss={() => setDeviceCodeInfo(null)} />
+    </>
+  )
+}
+
 export default function App() {
-  const { modules, psStatus, loadModules, loadSettings, checkFirstRun, initUpdaterListeners, appendLog } = useStore()
+  const { modules, psStatus, loadModules, loadSettings, checkFirstRun, initUpdaterListeners, appendLog, checkExistingSession, clearTenantSession } = useStore()
 
   useEffect(() => {
     loadSettings()
     loadModules()
     checkFirstRun()
     initUpdaterListeners()
+    checkExistingSession()
 
     if (window.api) {
       const unsubOut = window.api.onPsOutput((line) => appendLog(line, 'output'))
       const unsubErr = window.api.onPsError((line) => appendLog(line, 'error'))
+      const unsubDisc = window.api.onSessionDisconnected?.(() => clearTenantSession())
       return () => {
         unsubOut?.()
         unsubErr?.()
+        unsubDisc?.()
       }
     }
   }, [])
@@ -365,6 +626,7 @@ export default function App() {
         </main>
       </div>
       <FirstRunModal />
+      <ConnectModal />
       <UpdaterModal />
       <Notifications />
     </Router>
