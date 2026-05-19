@@ -79,17 +79,29 @@ try {
     }
 }`
   }
+  const tid = credentials.tenantId ? `-TenantId $mgTid` : ''
   return `
 $mgUser = '${safe(credentials.username)}'
 $mgPass = ConvertTo-SecureString '${safe(credentials.password)}' -AsPlainText -Force
 $mgCred = New-Object System.Management.Automation.PSCredential($mgUser, $mgPass)
 ${credentials.tenantId ? `$mgTid = '${safe(credentials.tenantId)}'` : ''}
 try {
-    Connect-MgGraph ${credentials.tenantId ? '-TenantId $mgTid' : ''} -Credential $mgCred -Scopes ${scopes} -NoWelcome -ErrorAction Stop
+    Connect-MgGraph ${tid} -Credential $mgCred -Scopes ${scopes} -NoWelcome -ErrorAction Stop
     Write-Output "CONNECTED: Microsoft Graph"
 } catch {
     $errMsg = $_.Exception.Message
     if ($errMsg -match 'listener') {${verifyBlock}
+    } elseif ($errMsg -match 'window handle|WindowHandle') {
+        # MSAL fell back to the Windows broker (WAM) which needs a parent window —
+        # unavailable in a subprocess. Switch to device code flow automatically.
+        Write-Output "INFO: Credential auth requires interactive sign-in - switching to device code flow..."
+        $mgCred = $null; $mgPass = $null
+        try {
+            Connect-MgGraph ${tid} -UseDeviceAuthentication -Scopes ${scopes} -NoWelcome -ErrorAction Stop
+            Write-Output "CONNECTED: Microsoft Graph"
+        } catch {
+            Write-Output "ERROR: Graph connect failed - $($_.Exception.Message)"; exit 1
+        }
     } else {
         Write-Output "ERROR: Graph connect failed - $errMsg"; exit 1
     }

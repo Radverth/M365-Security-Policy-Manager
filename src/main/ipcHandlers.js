@@ -121,9 +121,9 @@ function registerIpcHandlers(win) {
     const loginHint = (authMode !== 'interactive' && credentials?.username)
       ? `-LoginHint '${credentials.username.replace(/'/g, "''")}'`
       : ''
-    const connectArgs = authMode === 'interactive'
-      ? `-UseDeviceAuthentication -Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome`
-      : `-Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome ${loginHint}`
+    // Always use device code flow — WAM (the Windows broker fallback) requires a
+    // parent window handle that is unavailable in a console-less subprocess.
+    const connectArgs = `-UseDeviceAuthentication -Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome ${loginHint}`
 
     const script = `
 $ProgressPreference = 'SilentlyContinue'
@@ -201,7 +201,7 @@ try {
   Connect-MgGraph -Scopes 'Policy.ReadWrite.ConditionalAccess' -NoWelcome -Silent -ErrorAction Stop
 } catch {
   $errMsg = $_.Exception.Message
-  if ($errMsg -match 'listener') {
+  if ($errMsg -match 'listener|window handle') {
     $mgCtx = Get-MgContext -ErrorAction SilentlyContinue
     if (-not $mgCtx) {
       Write-Output "ERROR: Session expired - please reload policies to reconnect."
