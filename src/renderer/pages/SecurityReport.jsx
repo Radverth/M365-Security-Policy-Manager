@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import useStore from '../store'
 import Button from '../components/Button'
 
@@ -20,11 +20,9 @@ function formatUserList(users) {
   const excG = pick(users, 'ExcludeGroups', 'excludeGroups') || []
   const incR = pick(users, 'IncludeRoles', 'includeRoles') || []
   const excR = pick(users, 'ExcludeRoles', 'excludeRoles') || []
-
   if (inc.includes('All')) rows.push({ label: 'Applies to', value: 'All Users' })
   else if (inc.includes('GuestsOrExternalUsers')) rows.push({ label: 'Applies to', value: 'Guests & External Users' })
   else if (inc.length) rows.push({ label: 'Applies to', value: `${inc.length} specific user(s)` })
-
   if (incG.length) rows.push({ label: 'Groups', value: `${incG.length} group(s)` })
   if (incR.length) rows.push({ label: 'Roles', value: `${incR.length} role(s)` })
   if (excU.length) rows.push({ label: 'Excluding', value: `${excU.length} user(s)` })
@@ -34,9 +32,9 @@ function formatUserList(users) {
 }
 
 const APP_NAMES = {
-  'All': 'All Cloud Apps',
-  'Office365': 'Microsoft 365',
-  'MicrosoftAdminPortals': 'Admin Portals',
+  All: 'All Cloud Apps',
+  Office365: 'Microsoft 365',
+  MicrosoftAdminPortals: 'Admin Portals',
 }
 const USER_ACTIONS = {
   'urn:user:registersecurityinfo': 'Register Security Info',
@@ -49,11 +47,9 @@ function formatAppList(apps) {
   const inc = pick(apps, 'IncludeApplications', 'includeApplications') || []
   const exc = pick(apps, 'ExcludeApplications', 'excludeApplications') || []
   const actions = pick(apps, 'IncludeUserActions', 'includeUserActions') || []
-
   if (inc.includes('All')) rows.push({ label: 'Applies to', value: 'All Cloud Apps' })
   else if (inc.length === 1 && APP_NAMES[inc[0]]) rows.push({ label: 'Applies to', value: APP_NAMES[inc[0]] })
   else if (inc.length) rows.push({ label: 'Applies to', value: inc.map(id => APP_NAMES[id] || id).join(', ') })
-
   if (exc.length) rows.push({ label: 'Excluding', value: exc.map(id => APP_NAMES[id] || id.slice(0, 8) + '…').join(', ') })
   if (actions.length) rows.push({ label: 'User actions', value: actions.map(a => USER_ACTIONS[a] || a).join(', ') })
   return rows
@@ -129,38 +125,93 @@ function formatSessionControls(sc) {
   return parts
 }
 
-// ── Components ────────────────────────────────────────────────────────────────
+// ── Console component (live PS output) ───────────────────────────────────────
 
-function StateBadge({ state }) {
-  const cfg = {
-    enabled: { label: 'On', cls: 'bg-green-100 text-green-700' },
-    disabled: { label: 'Off', cls: 'bg-gray-100 text-gray-500' },
-    enabledForReportingButNotEnforced: { label: 'Report-only', cls: 'bg-amber-100 text-amber-700' },
-  }[state] || { label: state || 'Unknown', cls: 'bg-gray-100 text-gray-500' }
-  return <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${cfg.cls}`}>{cfg.label}</span>
+function lineColor(line) {
+  if (/^error:/i.test(line)) return '#f87171'           // red
+  if (/^success/i.test(line)) return '#4ade80'          // green
+  if (/^connect/i.test(line) || /connecting/i.test(line)) return '#fbbf24' // amber
+  if (/^done:/i.test(line)) return '#4ade80'            // green
+  return '#9ca3af'                                       // gray
 }
 
-function InfoRow({ label, value }) {
-  if (!value) return null
+function LiveConsole({ lines, status, orgName }) {
+  const bottomRef = useRef(null)
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [lines])
+
   return (
-    <div className="flex items-start gap-2 text-xs">
-      <span className="text-gray-400 w-24 flex-shrink-0 leading-relaxed">{label}</span>
-      <span className="text-gray-700 leading-relaxed">{value}</span>
+    <div className="flex flex-col h-full" style={{ background: '#0f1117' }}>
+      {/* Console header */}
+      <div className="flex items-center gap-3 px-5 py-3 border-b border-white/5">
+        {status === 'running' && (
+          <svg className="w-4 h-4 animate-spin flex-shrink-0" viewBox="0 0 24 24" fill="none" style={{ color: '#60a5fa' }}>
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
+            <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+          </svg>
+        )}
+        {status === 'done' && (
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="#4ade80" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        )}
+        <span className="text-xs font-mono" style={{ color: '#9ca3af' }}>
+          {status === 'running' ? `Fetching policies${orgName ? ` — ${orgName}` : ''}...` : 'Session complete'}
+        </span>
+        <span className="ml-auto text-xs font-mono" style={{ color: '#4b5563' }}>{lines.length} lines</span>
+      </div>
+
+      {/* Output */}
+      <div className="flex-1 overflow-y-auto px-5 py-4 font-mono text-xs leading-relaxed space-y-0.5">
+        {lines.length === 0 && status === 'running' && (
+          <span style={{ color: '#4b5563' }}>Waiting for output...</span>
+        )}
+        {lines.map((line, i) => (
+          <div key={i} style={{ color: lineColor(line) }}>{line}</div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
     </div>
   )
 }
 
-function Section({ title, children, hasContent }) {
-  if (!hasContent) return null
+// ── Policy card ───────────────────────────────────────────────────────────────
+
+const STATE_CFG = {
+  enabled: { label: 'Enabled', dot: '#22c55e', badge: '#dcfce7', badgeText: '#15803d' },
+  disabled: { label: 'Disabled', dot: '#9ca3af', badge: '#f3f4f6', badgeText: '#6b7280' },
+  enabledForReportingButNotEnforced: { label: 'Report-only', dot: '#f59e0b', badge: '#fef3c7', badgeText: '#d97706' },
+}
+const STATE_BORDER = {
+  enabled: '#22c55e',
+  disabled: '#e5e7eb',
+  enabledForReportingButNotEnforced: '#f59e0b',
+}
+
+function StateBadge({ state }) {
+  const cfg = STATE_CFG[state] || { label: state || 'Unknown', dot: '#9ca3af', badge: '#f3f4f6', badgeText: '#6b7280' }
   return (
-    <div>
-      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">{title}</p>
-      <div className="space-y-1">{children}</div>
+    <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full"
+      style={{ background: cfg.badge, color: cfg.badgeText }}>
+      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: cfg.dot }} />
+      {cfg.label}
+    </span>
+  )
+}
+
+function DetailChip({ label, value }) {
+  if (!value) return null
+  return (
+    <div className="flex items-baseline gap-1.5 min-w-0">
+      <span className="text-xs text-gray-400 flex-shrink-0">{label}</span>
+      <span className="text-xs text-gray-700 truncate">{value}</span>
     </div>
   )
 }
 
 function PolicyCard({ policy }) {
+  const [expanded, setExpanded] = useState(false)
   const state = pick(policy, 'State', 'state') || 'unknown'
   const name = pick(policy, 'DisplayName', 'displayName') || 'Unnamed Policy'
   const createdRaw = pick(policy, 'CreatedDateTime', 'createdDateTime')
@@ -176,7 +227,6 @@ function PolicyCard({ policy }) {
   const clientApps = pick(cond, 'ClientAppTypes', 'clientAppTypes') || []
   const signInRisk = pick(cond, 'SignInRiskLevels', 'signInRiskLevels') || []
   const userRisk = pick(cond, 'UserRiskLevels', 'userRiskLevels') || []
-
   const gc = pick(policy, 'GrantControls', 'grantControls')
   const sc = pick(policy, 'SessionControls', 'sessionControls')
 
@@ -190,92 +240,137 @@ function PolicyCard({ policy }) {
   const { controls, operator } = formatGrantControls(gc)
   const sessionCtrls = formatSessionControls(sc)
 
-  const hasConditions = platformStr || locationStr || clientAppStr || signInRiskStr || userRiskStr
+  // Summary line for collapsed view
+  const userSummary = userRows.find(r => r.label === 'Applies to')?.value || null
+  const appSummary = appRows.find(r => r.label === 'Applies to')?.value || null
+  const controlSummary = controls.length ? controls.join(operator === 'AND' ? ' + ' : ' / ') : null
+
+  const borderColor = STATE_BORDER[state] || '#e5e7eb'
 
   return (
-    <div className="rounded-xl border border-gray-200 overflow-hidden bg-white mb-4 break-inside-avoid">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100" style={{ background: '#f8f9fb' }}>
-        <h3 className="text-sm font-semibold text-gray-900 leading-tight">{name}</h3>
-        <StateBadge state={state} />
+    <div className="rounded-xl bg-white border border-gray-200 mb-3 overflow-hidden break-inside-avoid"
+      style={{ borderLeft: `4px solid ${borderColor}` }}>
+      {/* Header row */}
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-900 truncate">{name}</p>
+          {/* Quick-glance chips */}
+          <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
+            {userSummary && <DetailChip label="Users:" value={userSummary} />}
+            {appSummary && <DetailChip label="Apps:" value={appSummary} />}
+            {controlSummary && <DetailChip label="Grant:" value={controlSummary} />}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <StateBadge state={state} />
+          <button
+            onClick={() => setExpanded(e => !e)}
+            className="p-1 rounded hover:bg-gray-100 transition-colors"
+            title={expanded ? 'Collapse' : 'Expand'}
+          >
+            <svg className={`w-4 h-4 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        </div>
       </div>
 
-      {/* Body */}
-      <div className="px-5 py-4 grid grid-cols-2 gap-x-8 gap-y-4">
-        <Section title="Users" hasContent={userRows.length > 0}>
-          {userRows.map(({ label, value }) => <InfoRow key={label} label={label} value={value} />)}
-        </Section>
-
-        <Section title="Applications" hasContent={appRows.length > 0}>
-          {appRows.map(({ label, value }) => <InfoRow key={label} label={label} value={value} />)}
-        </Section>
-
-        <Section title="Conditions" hasContent={!!hasConditions}>
-          <InfoRow label="Platforms" value={platformStr} />
-          <InfoRow label="Locations" value={locationStr} />
-          <InfoRow label="Client apps" value={clientAppStr} />
-          <InfoRow label="Sign-in risk" value={signInRiskStr} />
-          <InfoRow label="User risk" value={userRiskStr} />
-        </Section>
-
-        <Section title="Controls" hasContent={controls.length > 0 || sessionCtrls.length > 0}>
-          {controls.length > 0 && (
-            <InfoRow label="Grant" value={controls.join(operator === 'AND' ? ' AND ' : ' OR ')} />
+      {/* Expanded detail */}
+      {expanded && (
+        <div className="border-t border-gray-100 px-4 py-3">
+          <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+            {userRows.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Users</p>
+                <div className="space-y-1">
+                  {userRows.map(({ label, value }) => (
+                    <div key={label} className="flex items-start gap-2 text-xs">
+                      <span className="text-gray-400 w-24 flex-shrink-0">{label}</span>
+                      <span className="text-gray-700">{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {appRows.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Applications</p>
+                <div className="space-y-1">
+                  {appRows.map(({ label, value }) => (
+                    <div key={label} className="flex items-start gap-2 text-xs">
+                      <span className="text-gray-400 w-24 flex-shrink-0">{label}</span>
+                      <span className="text-gray-700">{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {(platformStr || locationStr || clientAppStr || signInRiskStr || userRiskStr) && (
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Conditions</p>
+                <div className="space-y-1">
+                  {platformStr && <div className="flex gap-2 text-xs"><span className="text-gray-400 w-24 flex-shrink-0">Platforms</span><span className="text-gray-700">{platformStr}</span></div>}
+                  {locationStr && <div className="flex gap-2 text-xs"><span className="text-gray-400 w-24 flex-shrink-0">Locations</span><span className="text-gray-700">{locationStr}</span></div>}
+                  {clientAppStr && <div className="flex gap-2 text-xs"><span className="text-gray-400 w-24 flex-shrink-0">Client apps</span><span className="text-gray-700">{clientAppStr}</span></div>}
+                  {signInRiskStr && <div className="flex gap-2 text-xs"><span className="text-gray-400 w-24 flex-shrink-0">Sign-in risk</span><span className="text-gray-700">{signInRiskStr}</span></div>}
+                  {userRiskStr && <div className="flex gap-2 text-xs"><span className="text-gray-400 w-24 flex-shrink-0">User risk</span><span className="text-gray-700">{userRiskStr}</span></div>}
+                </div>
+              </div>
+            )}
+            {(controls.length > 0 || sessionCtrls.length > 0) && (
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Controls</p>
+                <div className="space-y-1">
+                  {controls.length > 0 && (
+                    <div className="flex gap-2 text-xs">
+                      <span className="text-gray-400 w-24 flex-shrink-0">Grant</span>
+                      <span className="text-gray-700">{controls.join(operator === 'AND' ? ' AND ' : ' OR ')}</span>
+                    </div>
+                  )}
+                  {sessionCtrls.map((s, i) => (
+                    <div key={i} className="flex gap-2 text-xs">
+                      <span className="text-gray-400 w-24 flex-shrink-0">Session</span>
+                      <span className="text-gray-700">{s}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          {(created || modified) && (
+            <div className="flex gap-5 mt-3 pt-3 border-t border-gray-100">
+              {created && <span className="text-xs text-gray-400">Created {created}</span>}
+              {modified && <span className="text-xs text-gray-400">Modified {modified}</span>}
+            </div>
           )}
-          {sessionCtrls.map((s, i) => <InfoRow key={i} label="Session" value={s} />)}
-        </Section>
-      </div>
-
-      {/* Footer — dates */}
-      {(created || modified) && (
-        <div className="flex items-center gap-6 px-5 py-2 border-t border-gray-100 bg-gray-50/50">
-          {created && <span className="text-xs text-gray-400">Created {created}</span>}
-          {modified && <span className="text-xs text-gray-400">Modified {modified}</span>}
         </div>
       )}
     </div>
   )
 }
 
-// ── Affinity branded report header ────────────────────────────────────────────
+// ── Branded report header (PDF) ───────────────────────────────────────────────
 
 function AffinityReportHeader({ orgName, date }) {
   return (
     <div className="rounded-xl overflow-hidden mb-6" style={{ background: '#1a2d4a' }}>
       <div className="relative px-8 py-6 overflow-hidden">
-        {/* Corner decorations — top-left gold */}
         <svg className="absolute -top-3 -left-3 opacity-70" width="90" height="90" viewBox="0 0 90 90" fill="none">
           <path d="M8 55 L8 8 L55 8" stroke="#E8A830" strokeWidth="5" strokeLinecap="round"/>
           <path d="M16 55 L16 16 L55 16" stroke="#E8A830" strokeWidth="3" strokeLinecap="round" strokeOpacity="0.45"/>
-          <path d="M26 36 L42 36 M36 28 L43 36 L36 44" stroke="#E8A830" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
-        {/* Bottom-right gold */}
         <svg className="absolute -bottom-3 -right-3 opacity-70" width="90" height="90" viewBox="0 0 90 90" fill="none">
           <path d="M82 35 L82 82 L35 82" stroke="#E8A830" strokeWidth="5" strokeLinecap="round"/>
           <path d="M74 35 L74 74 L35 74" stroke="#E8A830" strokeWidth="3" strokeLinecap="round" strokeOpacity="0.45"/>
-          <path d="M54 62 L38 46 M38 46 L54 46" stroke="#E8A830" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
-        {/* Top-right periwinkle */}
-        <svg className="absolute -top-3 -right-3 opacity-40" width="70" height="70" viewBox="0 0 70 70" fill="none">
-          <path d="M62 40 L62 8 L30 8" stroke="#8B9CC8" strokeWidth="4.5" strokeLinecap="round"/>
-          <path d="M54 40 L54 16 L30 16" stroke="#8B9CC8" strokeWidth="3" strokeLinecap="round" strokeOpacity="0.5"/>
-        </svg>
-        {/* Bottom-left periwinkle */}
-        <svg className="absolute -bottom-3 -left-3 opacity-40" width="70" height="70" viewBox="0 0 70 70" fill="none">
-          <path d="M8 30 L8 62 L40 62" stroke="#8B9CC8" strokeWidth="4.5" strokeLinecap="round"/>
-          <path d="M16 30 L16 54 L40 54" stroke="#8B9CC8" strokeWidth="3" strokeLinecap="round" strokeOpacity="0.5"/>
-        </svg>
-
-        {/* Content */}
         <div className="relative z-10 flex items-end justify-between">
           <div>
             <p className="text-4xl font-thin text-white tracking-tight leading-none" style={{ fontWeight: 300 }}>affinity</p>
             <p className="text-sm mt-1.5 font-light" style={{ color: '#E8A830' }}>Technology. Together.</p>
           </div>
           <div className="text-right space-y-1">
-            <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>
-              M365 Security Policy Report
-            </p>
+            <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>M365 Security Policy Report</p>
             <p className="text-lg font-semibold text-white">{orgName || 'Tenant'}</p>
             <p className="text-sm" style={{ color: 'rgba(255,255,255,0.6)' }}>{date}</p>
           </div>
@@ -287,10 +382,11 @@ function AffinityReportHeader({ orgName, date }) {
 
 // ── Report view ───────────────────────────────────────────────────────────────
 
-function ReportView({ orgName, tenantPolicies, date }) {
-  const enabled = tenantPolicies.filter(p => (pick(p, 'State', 'state')) === 'enabled').length
-  const reportOnly = tenantPolicies.filter(p => (pick(p, 'State', 'state')) === 'enabledForReportingButNotEnforced').length
-  const disabled = tenantPolicies.filter(p => (pick(p, 'State', 'state')) === 'disabled').length
+function ReportView({ orgName, tenantPolicies, date, logs }) {
+  const [showConsole, setShowConsole] = useState(false)
+  const enabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabled').length
+  const reportOnly = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabledForReportingButNotEnforced').length
+  const disabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'disabled').length
 
   function handleExportPDF() {
     const style = document.createElement('style')
@@ -301,53 +397,81 @@ function ReportView({ orgName, tenantPolicies, date }) {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
-      {/* Export button */}
-      <div className="flex justify-end px-6 pt-4 pb-2">
-        <Button variant="secondary" onClick={handleExportPDF}>
-          <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Toolbar */}
+      <div className="flex items-center gap-3 px-5 py-3 border-b border-gray-200 bg-white flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
-          Export PDF
-        </Button>
+          <span className="text-sm font-semibold text-gray-800">{orgName}</span>
+          <span className="text-sm text-gray-400">&mdash; {tenantPolicies.length} policies</span>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          {logs?.length > 0 && (
+            <button
+              onClick={() => setShowConsole(s => !s)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${showConsole ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              {showConsole ? 'Hide log' : 'Show log'}
+            </button>
+          )}
+          <Button variant="secondary" onClick={handleExportPDF}>
+            <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+            Export PDF
+          </Button>
+        </div>
       </div>
 
-      <div id="report-printable" className="px-6 pb-8">
+      {/* Console panel (collapsible) */}
+      {showConsole && logs?.length > 0 && (
+        <div className="flex-shrink-0 h-40 border-b border-gray-200">
+          <LiveConsole lines={logs} status="done" orgName={orgName} />
+        </div>
+      )}
+
+      {/* Report content */}
+      <div id="report-printable" className="flex-1 overflow-y-auto px-6 py-5">
         <AffinityReportHeader orgName={orgName} date={date} />
 
-        {/* Summary stats */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        {/* Stats */}
+        <div className="grid grid-cols-4 gap-3 mb-5">
           {[
-            { label: 'Total Policies', value: tenantPolicies.length, cls: 'text-gray-800' },
-            { label: 'Enabled', value: enabled, cls: 'text-green-600' },
-            { label: 'Report-only', value: reportOnly, cls: 'text-amber-500' },
-            { label: 'Disabled', value: disabled, cls: 'text-gray-400' },
-          ].map(({ label, value, cls }) => (
-            <div key={label} className="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
-              <p className={`text-4xl font-bold leading-none ${cls}`}>{value}</p>
-              <p className="text-xs font-semibold text-gray-500 mt-2 uppercase tracking-wide">{label}</p>
+            { label: 'Total', value: tenantPolicies.length, color: '#1a2d4a' },
+            { label: 'Enabled', value: enabled, color: '#16a34a' },
+            { label: 'Report-only', value: reportOnly, color: '#d97706' },
+            { label: 'Disabled', value: disabled, color: '#9ca3af' },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="bg-white border border-gray-200 rounded-xl p-4 text-center">
+              <p className="text-3xl font-bold leading-none" style={{ color }}>{value}</p>
+              <p className="text-xs font-semibold text-gray-400 mt-1.5 uppercase tracking-wide">{label}</p>
             </div>
           ))}
         </div>
 
-        {/* Policy cards */}
-        <div>
-          {tenantPolicies.length === 0 ? (
-            <div className="rounded-xl border border-gray-200 bg-white p-8 text-center">
-              <p className="text-sm text-gray-400">No Conditional Access policies found in this tenant.</p>
-            </div>
-          ) : (
-            tenantPolicies.map(p => (
-              <PolicyCard key={pick(p, 'Id', 'id')} policy={p} />
-            ))
-          )}
+        {/* Expand-all toggle */}
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Policies</p>
+          <p className="text-xs text-gray-400">Click a policy to expand details</p>
         </div>
 
-        {/* Footer note */}
-        <div className="mt-6 rounded-xl border border-gray-200 bg-gray-50 px-5 py-3">
+        {tenantPolicies.length === 0 ? (
+          <div className="rounded-xl border border-gray-200 bg-white p-8 text-center">
+            <p className="text-sm text-gray-400">No Conditional Access policies found in this tenant.</p>
+          </div>
+        ) : (
+          tenantPolicies.map(p => <PolicyCard key={pick(p, 'Id', 'id')} policy={p} />)
+        )}
+
+        <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 px-5 py-3">
           <p className="text-xs text-gray-500">
             <span className="font-semibold text-gray-700">Note:</span>{' '}
-            This report covers Conditional Access policies only. Group and user display names are not resolved — GUIDs are shown where applicable.
+            This report covers Conditional Access policies only. GUIDs are shown where display names are unavailable.
           </p>
         </div>
       </div>
@@ -355,26 +479,7 @@ function ReportView({ orgName, tenantPolicies, date }) {
   )
 }
 
-// ── Auth panel sub-components ─────────────────────────────────────────────────
-
-function AuthModeSelector({ mode, onChange }) {
-  return (
-    <div className="flex gap-2 mb-4">
-      {[{ id: 'itglue', label: 'IT Glue' }, { id: 'interactive', label: 'Interactive' }].map((m) => (
-        <button
-          key={m.id}
-          onClick={() => onChange(m.id)}
-          className={[
-            'flex-1 py-2 px-3 rounded-lg border-2 text-sm font-medium transition-all',
-            mode === m.id ? 'border-navy bg-navy-50 text-navy' : 'border-gray-200 hover:border-gray-300 text-gray-600',
-          ].join(' ')}
-        >
-          {m.label}
-        </button>
-      ))}
-    </div>
-  )
-}
+// ── Auth panel ────────────────────────────────────────────────────────────────
 
 function ItGluePanel({ org, setOrg, credentials, setCredentials }) {
   const { orgs, orgsLoading, loadOrgs, settings } = useStore()
@@ -406,9 +511,9 @@ function ItGluePanel({ org, setOrg, credentials, setCredentials }) {
 
   if (!settings.itGlueApiKey) {
     return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
-        <p className="text-xs font-medium text-amber-800 mb-1">IT Glue API key not configured</p>
-        <p className="text-xs text-amber-700">Go to Settings to add your IT Glue API key.</p>
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <p className="text-xs font-semibold text-amber-800 mb-0.5">IT Glue not configured</p>
+        <p className="text-xs text-amber-700">Add your IT Glue API key in Settings.</p>
       </div>
     )
   }
@@ -421,62 +526,74 @@ function ItGluePanel({ org, setOrg, credentials, setCredentials }) {
 
   return (
     <div className="space-y-4">
+      {/* Org search */}
       <div>
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Organisation</p>
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Organisation</label>
         <input
           type="text"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Search orgs..."
-          className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy mb-1.5"
+          placeholder="Search organisations..."
+          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
         />
-        <div className="max-h-40 overflow-y-auto space-y-1 pr-1">
-          {orgsLoading ? Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-9 bg-gray-100 rounded-lg animate-pulse" />
-          )) : filteredOrgs.length === 0 ? (
+        <div className="mt-1.5 max-h-36 overflow-y-auto space-y-1">
+          {orgsLoading ? (
+            Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="h-8 bg-gray-100 rounded-lg animate-pulse" />
+            ))
+          ) : filteredOrgs.length === 0 ? (
             <p className="text-xs text-gray-400 py-2 text-center">No organisations found</p>
           ) : filteredOrgs.map(o => (
             <button
               key={o.id}
               onClick={() => { setOrg(o); setCredentials(null); setSelectedPwId(null) }}
-              className={['w-full flex items-center justify-between px-3 py-2 rounded-lg border text-left text-xs transition-all',
-                org?.id === o.id ? 'border-navy bg-navy-50 text-navy font-medium' : 'border-gray-200 hover:border-navy-200 hover:bg-gray-50',
+              className={[
+                'w-full flex items-center justify-between px-3 py-2 rounded-lg border text-left text-xs transition-all',
+                org?.id === o.id
+                  ? 'border-navy bg-navy text-white font-medium'
+                  : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-gray-700',
               ].join(' ')}
             >
               <span>{o.name}</span>
-              {o.shortName && <span className="text-gray-400">{o.shortName}</span>}
+              {o.shortName && <span className="opacity-60 text-xs">{o.shortName}</span>}
             </button>
           ))}
         </div>
       </div>
 
+      {/* Credential picker */}
       {org && (
         <div>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Credential</p>
-          {pwLoading ? Array.from({ length: 2 }).map((_, i) => (
-            <div key={i} className="h-9 bg-gray-100 rounded-lg animate-pulse mb-1" />
-          )) : passwords.length === 0 ? (
+          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Credential</label>
+          {pwLoading ? (
+            Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="h-10 bg-gray-100 rounded-lg animate-pulse mb-1" />
+            ))
+          ) : passwords.length === 0 ? (
             <p className="text-xs text-gray-400 py-2 text-center">No 365 / Global Admin credentials found</p>
           ) : (
-            <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+            <div className="max-h-36 overflow-y-auto space-y-1">
               {passwords.map(pw => (
                 <button
                   key={pw.id}
                   onClick={() => { setSelectedPwId(pw.id); setCredentials({ username: pw.username, password: pw.password, tenantId: '' }) }}
-                  className={['w-full flex items-center justify-between px-3 py-2 rounded-lg border text-left text-xs transition-all',
-                    selectedPwId === pw.id ? 'border-navy bg-navy-50 text-navy' : 'border-gray-200 hover:border-navy-200 hover:bg-gray-50',
+                  className={[
+                    'w-full px-3 py-2 rounded-lg border text-left text-xs transition-all',
+                    selectedPwId === pw.id
+                      ? 'border-navy bg-navy text-white font-medium'
+                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50',
                   ].join(' ')}
                 >
-                  <div>
-                    <p className="font-medium text-gray-800">{pw.name}</p>
-                    <p className="text-gray-500">{pw.username}</p>
-                  </div>
+                  <p className={`font-medium ${selectedPwId === pw.id ? 'text-white' : 'text-gray-800'}`}>{pw.name}</p>
+                  <p className={`mt-0.5 ${selectedPwId === pw.id ? 'text-white/70' : 'text-gray-500'}`}>{pw.username}</p>
                 </button>
               ))}
             </div>
           )}
           {hiddenCount > 0 && (
-            <p className="mt-1.5 text-xs text-gray-400 italic">{hiddenCount} password{hiddenCount !== 1 ? 's' : ''} hidden (recovery / break-glass)</p>
+            <p className="mt-1.5 text-xs text-gray-400 italic">
+              {hiddenCount} password{hiddenCount !== 1 ? 's' : ''} hidden (recovery / break-glass)
+            </p>
           )}
         </div>
       )}
@@ -488,43 +605,43 @@ function InteractivePanel({ org, setOrg, setCredentials }) {
   useEffect(() => {
     setCredentials({ interactive: true, username: '', password: '', tenantId: '' })
   }, [])
+
   return (
-    <div>
-      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Organisation name</label>
-      <input
-        type="text"
-        value={org?.name || ''}
-        onChange={e => setOrg({ id: 'manual', name: e.target.value, shortName: '' })}
-        placeholder="e.g. AffinityIT"
-        className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
-      />
-      <p className="mt-2 text-xs text-gray-500">A device code will appear in the output — go to microsoft.com/devicelogin and enter it to authenticate.</p>
+    <div className="space-y-3">
+      <div>
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Organisation name</label>
+        <input
+          type="text"
+          value={org?.name || ''}
+          onChange={e => setOrg({ id: 'manual', name: e.target.value, shortName: '' })}
+          placeholder="e.g. AffinityIT"
+          className="block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
+        />
+      </div>
+      <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5">
+        <p className="text-xs font-semibold text-blue-700 mb-0.5">Device code login</p>
+        <p className="text-xs text-blue-600 leading-relaxed">
+          A device code will appear in the output. Visit <span className="font-medium">microsoft.com/devicelogin</span> and enter it to authenticate.
+        </p>
+      </div>
     </div>
   )
 }
 
-// ── Empty / loading states ────────────────────────────────────────────────────
+// ── Empty state ───────────────────────────────────────────────────────────────
 
 function EmptyState() {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-8">
-      <div className="w-20 h-20 rounded-2xl flex items-center justify-center mb-6" style={{ background: '#f0f3f8' }}>
-        <svg className="w-10 h-10 text-navy/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.4}>
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-5" style={{ background: '#f0f3f8' }}>
+        <svg className="w-8 h-8 text-navy/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.4}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
         </svg>
       </div>
-      <h3 className="text-base font-semibold text-gray-600 mb-2">No report generated</h3>
-      <p className="text-sm text-gray-400 max-w-xs">Select an organisation and generate a report to see all Conditional Access policies configured in the tenant.</p>
-    </div>
-  )
-}
-
-function LoadingState({ lastLine }) {
-  return (
-    <div className="flex flex-col items-center justify-center h-full text-center px-8">
-      <div className="w-12 h-12 rounded-full border-4 border-navy/20 border-t-navy animate-spin mb-6" />
-      <p className="text-sm font-medium text-gray-700">Fetching policies…</p>
-      {lastLine && <p className="mt-2 text-xs text-gray-400 max-w-sm truncate">{lastLine}</p>}
+      <h3 className="text-sm font-semibold text-gray-600 mb-2">No report generated</h3>
+      <p className="text-xs text-gray-400 max-w-xs leading-relaxed">
+        Select an organisation and authentication method, then click Generate Report.
+      </p>
     </div>
   )
 }
@@ -539,8 +656,6 @@ export default function SecurityReport() {
   const [logs, setLogs] = useState([])
   const [report, setReport] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
-
-  const lastLine = logs[logs.length - 1] || ''
 
   const canGenerate = useCallback(() => {
     if (!org?.name) return false
@@ -588,68 +703,87 @@ export default function SecurityReport() {
     }
   }
 
+  const isRunning = status === 'running'
+  const isDone = status === 'done' && report
+
   return (
     <div className="flex h-full overflow-hidden">
-      {/* Left setup panel */}
-      <aside className="w-72 flex-shrink-0 border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
-        <div className="px-5 py-5 border-b border-gray-100">
+      {/* ── Left sidebar ── */}
+      <aside className="w-72 flex-shrink-0 border-r border-gray-200 bg-white flex flex-col">
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-gray-100">
           <h2 className="text-sm font-bold text-gray-800">Security Report</h2>
-          <p className="text-xs text-gray-500 mt-0.5">Export a full CA policy inventory for any tenant</p>
+          <p className="text-xs text-gray-400 mt-0.5">Full CA policy inventory for any tenant</p>
         </div>
 
-        <div className="flex-1 px-5 py-5 space-y-5">
-          <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Authentication</p>
-            <AuthModeSelector mode={authMode} onChange={handleAuthModeChange} />
-            {authMode === 'itglue' ? (
-              <ItGluePanel org={org} setOrg={setOrg} credentials={credentials} setCredentials={setCredentials} />
-            ) : (
-              <InteractivePanel org={org} setOrg={setOrg} setCredentials={setCredentials} />
-            )}
+        {/* Auth mode tabs */}
+        <div className="px-5 pt-4">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Authentication</p>
+          <div className="flex gap-1.5 p-1 bg-gray-100 rounded-lg mb-4">
+            {[{ id: 'itglue', label: 'IT Glue' }, { id: 'interactive', label: 'Interactive' }].map((m) => (
+              <button
+                key={m.id}
+                onClick={() => handleAuthModeChange(m.id)}
+                className={[
+                  'flex-1 py-1.5 px-2 rounded-md text-xs font-semibold transition-all',
+                  authMode === m.id
+                    ? 'bg-white text-navy shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700',
+                ].join(' ')}
+              >
+                {m.label}
+              </button>
+            ))}
           </div>
+
+          {authMode === 'itglue' ? (
+            <ItGluePanel org={org} setOrg={setOrg} credentials={credentials} setCredentials={setCredentials} />
+          ) : (
+            <InteractivePanel org={org} setOrg={setOrg} setCredentials={setCredentials} />
+          )}
         </div>
 
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Error + Generate */}
         <div className="px-5 py-4 border-t border-gray-100 space-y-3">
           {status === 'error' && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5">
               <p className="text-xs font-semibold text-red-700 mb-0.5">Error</p>
-              <p className="text-xs text-red-600 break-words">{errorMsg}</p>
-            </div>
-          )}
-          {status === 'running' && logs.length > 0 && (
-            <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 max-h-28 overflow-y-auto">
-              {logs.map((l, i) => (
-                <p key={i} className="text-xs font-mono text-gray-500 leading-relaxed truncate">{l}</p>
-              ))}
+              <p className="text-xs text-red-600 break-words leading-relaxed">{errorMsg}</p>
             </div>
           )}
           <Button
             variant="primary"
             className="w-full"
-            disabled={!canGenerate() || status === 'running'}
+            disabled={!canGenerate() || isRunning}
             onClick={handleGenerate}
           >
-            {status === 'running' ? (
-              <span className="flex items-center gap-2">
+            {isRunning ? (
+              <span className="flex items-center justify-center gap-2">
                 <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
                   <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
                   <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
                 </svg>
-                Fetching…
+                Fetching...
               </span>
-            ) : 'Generate Report'}
+            ) : isDone ? 'Re-generate' : 'Generate Report'}
           </Button>
         </div>
       </aside>
 
-      {/* Right report panel */}
+      {/* ── Right area ── */}
       <main className="flex-1 overflow-hidden bg-gray-50">
-        {status === 'idle' || (status === 'error' && !report) ? (
-          <EmptyState />
-        ) : status === 'running' ? (
-          <LoadingState lastLine={lastLine} />
-        ) : report ? (
-          <ReportView orgName={report.orgName} tenantPolicies={report.policies} date={report.date} />
+        {isRunning ? (
+          <LiveConsole lines={logs} status="running" orgName={org?.name} />
+        ) : isDone ? (
+          <ReportView
+            orgName={report.orgName}
+            tenantPolicies={report.policies}
+            date={report.date}
+            logs={logs}
+          />
         ) : (
           <EmptyState />
         )}
