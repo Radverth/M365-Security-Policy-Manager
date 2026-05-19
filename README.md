@@ -81,11 +81,11 @@ Required modules:
 
 | Module | Purpose |
 |---|---|
+| `Microsoft.Graph.Authentication` | Graph authentication and connection management |
 | `Microsoft.Graph` | Core Graph API access |
 | `Microsoft.Graph.Identity.SignIns` | Conditional Access policies |
 | `Microsoft.Graph.DeviceManagement` | Intune / device compliance |
 | `ExchangeOnlineManagement` | Exchange Online policies |
-| `AzureAD` | Azure AD tenant management |
 
 ### 3. Create Policies
 

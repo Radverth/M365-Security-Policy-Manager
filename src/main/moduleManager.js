@@ -1,6 +1,7 @@
 const { runScript } = require('./powershell')
 
 const REQUIRED_MODULES = [
+  { name: 'Microsoft.Graph.Authentication', description: 'Microsoft Graph authentication and connection management' },
   { name: 'Microsoft.Graph', description: 'Core Graph API access for policy creation' },
   { name: 'Microsoft.Graph.Identity.SignIns', description: 'Conditional Access policy management' },
   { name: 'Microsoft.Graph.DeviceManagement', description: 'Intune / device compliance policies' },
