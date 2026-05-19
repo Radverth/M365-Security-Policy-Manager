@@ -121,9 +121,22 @@ function registerIpcHandlers(win) {
     const loginHint = (authMode !== 'interactive' && credentials?.username)
       ? `-LoginHint '${credentials.username.replace(/'/g, "''")}'`
       : ''
-    const connectArgs = authMode === 'interactive'
-      ? `-UseDeviceAuthentication -Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome`
-      : `-Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome ${loginHint}`
+
+    const connectBlock = authMode === 'interactive'
+      ? `
+Write-Output "Authenticating with Microsoft Graph..."
+try {
+  Connect-MgGraph -Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome -Silent -ErrorAction Stop
+  Write-Output "Connected (session resumed)."
+} catch {
+  Write-Output "No cached session - follow the device code prompt below..."
+  Connect-MgGraph -UseDeviceAuthentication -Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome -ErrorAction Stop
+  Write-Output "Connected."
+}`
+      : `
+Write-Output "Connecting to Microsoft Graph..."
+Connect-MgGraph -Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome ${loginHint}
+Write-Output "Connected."`
 
     const script = `
 $ProgressPreference = 'SilentlyContinue'
@@ -134,16 +147,16 @@ if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
 Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
 Import-Module Microsoft.Graph.Identity.SignIns -ErrorAction SilentlyContinue
 try {
-  Write-Output "Connecting to Microsoft Graph..."
-  Connect-MgGraph ${connectArgs}
-  Write-Output "Connected. Fetching policies..."
+  ${connectBlock}
+  Write-Output "Fetching policies..."
   $policies = Get-MgIdentityConditionalAccessPolicy -All
   Write-Output "POLICY_JSON_START"
   $policies | ConvertTo-Json -Depth 10
   Write-Output "POLICY_JSON_END"
-  Disconnect-MgGraph | Out-Null
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
+} finally {
+  try { Disconnect-MgGraph -ErrorAction SilentlyContinue } catch {}
 }
 `
     const lines = []
@@ -297,7 +310,7 @@ try {
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
 } finally {
-  try { Disconnect-MgGraph -ErrorAction SilentlyContinue } catch {}
+  try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
 }
 `
     const lines = []

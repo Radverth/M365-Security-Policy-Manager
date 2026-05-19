@@ -54,12 +54,18 @@ function buildConnectGraph(credentials, authMode, opts = {}) {
   const scopes = '"Policy.ReadWrite.ConditionalAccess Policy.Read.All DeviceManagementConfiguration.ReadWrite.All Organization.ReadWrite.All Directory.ReadWrite.All RoleManagement.ReadWrite.Directory AuditLog.Read.All"'
   if (authMode === 'interactive') {
     const tid = credentials?.tenantId ? `-TenantId '${safe(credentials.tenantId)}'` : ''
-    return `Write-Output "CONNECTING: Microsoft Graph - follow the device code prompt below..."
+    return `Write-Output "CONNECTING: Authenticating with Microsoft Graph..."
 try {
-    Connect-MgGraph ${tid} -UseDeviceAuthentication -Scopes ${scopes} -NoWelcome
-    Write-Output "CONNECTED: Microsoft Graph"
+    Connect-MgGraph ${tid} -Scopes ${scopes} -NoWelcome -Silent -ErrorAction Stop
+    Write-Output "CONNECTED: Microsoft Graph (session resumed)"
 } catch {
-    Write-Output "ERROR: Graph connect failed - $($_.Exception.Message)"; exit 1
+    Write-Output "CONNECTING: No cached session - follow the device code prompt below..."
+    try {
+        Connect-MgGraph ${tid} -UseDeviceAuthentication -Scopes ${scopes} -NoWelcome -ErrorAction Stop
+        Write-Output "CONNECTED: Microsoft Graph"
+    } catch {
+        Write-Output "ERROR: Graph connect failed - $($_.Exception.Message)"; exit 1
+    }
 }`
   }
   return `
@@ -76,7 +82,16 @@ try {
 $mgCred = $null; $mgPass = $null; [System.GC]::Collect()`
 }
 
-function buildConnectExo(credentials) {
+function buildConnectExo(credentials, authMode) {
+  if (authMode === 'interactive') {
+    return `Write-Output "CONNECTING: Exchange Online (device code)..."
+try {
+    Connect-ExchangeOnline -Device -ShowBanner:$false -ErrorAction Stop
+    Write-Output "CONNECTED: Exchange Online"
+} catch {
+    Write-Output "ERROR: EXO connect failed - $($_.Exception.Message)"
+}`
+  }
   const upn = credentials?.username ? `-UserPrincipalName '${safe(credentials.username)}'` : ''
   return `Write-Output "CONNECTING: Exchange Online..."
 try {
@@ -87,7 +102,16 @@ try {
 }`
 }
 
-function buildConnectIpps(credentials) {
+function buildConnectIpps(credentials, authMode) {
+  if (authMode === 'interactive') {
+    return `Write-Output "CONNECTING: Security & Compliance (device code)..."
+try {
+    Connect-IPPSSession -Device -ShowBanner:$false -ErrorAction Stop
+    Write-Output "CONNECTED: Security & Compliance"
+} catch {
+    Write-Output "ERROR: IPPS connect failed - $($_.Exception.Message)"
+}`
+  }
   const upn = credentials?.username ? `-UserPrincipalName '${safe(credentials.username)}'` : ''
   return `Write-Output "CONNECTING: Security & Compliance..."
 try {
@@ -860,8 +884,8 @@ function buildScript(policies, credentials, prefix, authMode = 'interactive', po
   const parts = [PS_PREFS, '', buildModuleImports(hasGraph, hasExo, hasIpps), '']
 
   if (hasGraph) parts.push(buildConnectGraph(credentials, authMode, opts))
-  if (hasExo)   parts.push(buildConnectExo(credentials))
-  if (hasIpps)  parts.push(buildConnectIpps(credentials))
+  if (hasExo)   parts.push(buildConnectExo(credentials, authMode))
+  if (hasIpps)  parts.push(buildConnectIpps(credentials, authMode))
 
   parts.push('')
   for (const policy of policies) {
