@@ -19,7 +19,7 @@ export const POLICIES = [
   { id: 'CA002', category: 'Conditional Access', name: 'Block Legacy Authentication', description: 'Blocks all legacy authentication protocols that do not support MFA.', severity: 'critical', scriptFn: 'createBlockLegacyAuthPolicy', defaultEnabled: true, dependencies: [], platforms: ['all'] },
   { id: 'CA003', category: 'Conditional Access', name: 'Require MFA for Admins', description: 'Requires MFA for all directory role members regardless of location.', severity: 'critical', scriptFn: 'createGenericPolicy', defaultEnabled: true, dependencies: [], platforms: ['all'] },
   { id: 'CA004', category: 'Conditional Access', name: 'Require Compliant Device', description: 'Grants access only from Intune-compliant or hybrid-joined devices.', severity: 'high', scriptFn: 'createGenericPolicy', defaultEnabled: false, dependencies: ['EN001'], platforms: ['windows', 'macos', 'ios', 'android'] },
-  { id: 'CA005', category: 'Conditional Access', name: 'Block Access from High-Risk Countries', description: 'Blocks sign-ins from countries not in the approved named locations list.', severity: 'high', scriptFn: 'createGenericPolicy', defaultEnabled: false, dependencies: [], platforms: ['all'] },
+  { id: 'CA005', category: 'Conditional Access', name: 'Block All Non-UK Access', description: 'Blocks all sign-ins from outside the United Kingdom. Creates a UK named location (GB) then blocks all users from all apps unless signing in from the UK. Any sign-in originating outside the UK will be denied.', severity: 'high', scriptFn: 'createGenericPolicy', defaultEnabled: false, dependencies: [], platforms: ['all'] },
   { id: 'CA006', category: 'Conditional Access', name: 'Require MFA for Azure Management', description: 'Requires MFA when accessing Azure portal and management APIs.', severity: 'critical', scriptFn: 'createGenericPolicy', defaultEnabled: true, dependencies: [], platforms: ['all'] },
   { id: 'CA007', category: 'Conditional Access', name: 'Block High Sign-In Risk', description: 'Blocks access when Azure AD Identity Protection detects high sign-in risk.', severity: 'critical', scriptFn: 'createGenericPolicy', defaultEnabled: true, dependencies: ['IP001'], platforms: ['all'] },
   { id: 'CA008', category: 'Conditional Access', name: 'Require Password Change for High User Risk', description: 'Forces password reset when user risk level is detected as high.', severity: 'critical', scriptFn: 'createGenericPolicy', defaultEnabled: true, dependencies: ['IP002'], platforms: ['all'] },
@@ -41,7 +41,6 @@ export const POLICIES = [
   { id: 'CA026', category: 'Conditional Access', name: 'Require Phishing-Resistant MFA for Admins', description: 'Requires FIDO2 or certificate-based auth for privileged admin accounts.', severity: 'critical', scriptFn: 'createGenericPolicy', defaultEnabled: false, dependencies: ['CA003'], platforms: ['all'] },
   { id: 'CA027', category: 'Conditional Access', name: 'Require Compliant Device for Email (Outlook)', description: 'Restricts Exchange Online / Outlook to compliant managed devices.', severity: 'high', scriptFn: 'createGenericPolicy', defaultEnabled: false, dependencies: ['CA004'], platforms: ['all'] },
   { id: 'CA028', category: 'Conditional Access', name: 'Named Location: Office IPs', description: 'Defines approved corporate IP ranges as trusted named locations.', severity: 'info', scriptFn: 'createGenericPolicy', defaultEnabled: false, dependencies: [], platforms: ['all'] },
-  { id: 'CA029', category: 'Conditional Access', name: 'Named Location: Country Allowlist', description: 'Defines approved countries as trusted named locations for policy targeting.', severity: 'info', scriptFn: 'createGenericPolicy', defaultEnabled: false, dependencies: [], platforms: ['all'] },
   { id: 'CA030', category: 'Conditional Access', name: 'Session Control: App-Enforced Restrictions', description: 'Passes device compliance signal to O365 apps for app-enforced restrictions.', severity: 'medium', scriptFn: 'createGenericPolicy', defaultEnabled: false, dependencies: [], platforms: ['all'] },
   { id: 'CA031', category: 'Conditional Access', name: 'Require MFA for Intune Enrollment', description: 'Requires MFA when enrolling a new device into Intune MDM.', severity: 'high', scriptFn: 'createGenericPolicy', defaultEnabled: true, dependencies: [], platforms: ['all'] },
   { id: 'CA033', category: 'Conditional Access', name: 'Require MFA for Microsoft Admin Portals', description: 'Requires MFA for Microsoft 365 Admin Center, Exchange Admin, etc.', severity: 'critical', scriptFn: 'createGenericPolicy', defaultEnabled: true, dependencies: [], platforms: ['all'] },
@@ -204,9 +203,8 @@ export const POLICY_EXTRA_FIELDS = {
     { key: 'locationName', label: 'Location Name', type: 'text', default: 'Corporate Office IPs' },
     { key: 'ipRanges', label: 'Office IP Ranges (CIDR)', type: 'text', default: '', hint: 'e.g. 203.0.113.0/24, 10.0.0.0/8' },
   ],
-  CA029: [
-    { key: 'locationName', label: 'Location Name', type: 'text', default: 'Approved Countries' },
-    { key: 'allowedCountries', label: 'Allowed Country Codes', type: 'text', default: 'AU,NZ,GB,US,CA', hint: 'Comma-separated ISO 3166-1 alpha-2 codes' },
+  CA005: [
+    { key: '_warning', type: 'callout', text: 'This policy blocks ALL sign-ins from outside the United Kingdom. Every user on every app will be denied access unless they are connecting from the UK (country code GB). Verify that all users are UK-based before enabling this policy.' },
   ],
   CA045: [{ key: 'sessionLifetimeHours', label: 'Admin Session Lifetime (hours)', type: 'number', default: 1, min: 1, max: 24 }],
   EX004: [

@@ -181,11 +181,12 @@ New-MgIdentityConditionalAccessPolicy -BodyParameter $params | Out-Null`
     case 'CA004': return policyBlock(policy.id, policy.name, caPolicy(allUsers(), allApps, grantCompliant))
 
     case 'CA005': return policyBlock(policy.id, policy.name,
-      `$nlParams = @{ '@odata.type' = '#microsoft.graph.countryNamedLocation'; DisplayName = 'Blocked Countries (CA005)'; CountriesAndRegions = @('KP','IR','RU','CN','SY'); IncludeUnknownCountriesAndRegions = $true }
+      `$nlParams = @{ '@odata.type' = '#microsoft.graph.countryNamedLocation'; DisplayName = 'United Kingdom (CA005)'; CountriesAndRegions = @('GB'); IncludeUnknownCountriesAndRegions = $false }
 $nl = New-MgIdentityConditionalAccessNamedLocation -BodyParameter $nlParams
+Write-Output "  Created named location: United Kingdom (GB)"
 $params = @{
     DisplayName = ${psStr(displayName)}; State = ${psStr(state)}
-    Conditions = @{ Users = ${allUsers()}; Applications = ${allApps}; Locations = @{ IncludeLocations = @($nl.Id) } }
+    Conditions = @{ Users = ${allUsers()}; Applications = ${allApps}; Locations = @{ IncludeLocations = @('All'); ExcludeLocations = @($nl.Id) } }
     GrantControls = ${grantBlock}
 }
 New-MgIdentityConditionalAccessPolicy -BodyParameter $params | Out-Null`)
@@ -271,14 +272,6 @@ New-MgIdentityConditionalAccessPolicy -BodyParameter $params | Out-Null`)
       const rangesPs = ranges.map(r => `@{ '@odata.type' = '#microsoft.graph.iPv4CidrRange'; CidrAddress = '${safe(r)}' }`).join(', ')
       return policyBlock(policy.id, policy.name,
         `$nlParams = @{ '@odata.type' = '#microsoft.graph.ipNamedLocation'; DisplayName = ${psStr(config.locationName || 'Corporate Office IPs')}; IsTrusted = $true; IpRanges = @(${rangesPs}) }
-New-MgIdentityConditionalAccessNamedLocation -BodyParameter $nlParams | Out-Null`)
-    }
-
-    case 'CA029': {
-      const countries = (config.allowedCountries || 'AU,NZ,GB,US,CA').split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
-      const cPs = countries.map(c => `'${c}'`).join(', ')
-      return policyBlock(policy.id, policy.name,
-        `$nlParams = @{ '@odata.type' = '#microsoft.graph.countryNamedLocation'; DisplayName = ${psStr(config.locationName || 'Approved Countries')}; CountriesAndRegions = @(${cPs}); IncludeUnknownCountriesAndRegions = $false }
 New-MgIdentityConditionalAccessNamedLocation -BodyParameter $nlParams | Out-Null`)
     }
 

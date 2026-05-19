@@ -16,6 +16,17 @@ function getDefaults(policy) {
 function FieldInput({ field, value, onChange }) {
   const cls = 'block w-full rounded border border-gray-300 px-2.5 py-1.5 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy'
 
+  if (field.type === 'callout') {
+    return (
+      <div className="col-span-2 flex items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5">
+        <svg className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+        </svg>
+        <p className="text-xs text-amber-800 leading-relaxed">{field.text}</p>
+      </div>
+    )
+  }
+
   if (field.type === 'select') {
     return (
       <select value={value} onChange={e => onChange(e.target.value)} className={cls}>
@@ -67,7 +78,7 @@ function PolicyRow({ policy, config, onChange }) {
   }[state] || state
 
   // Count non-default, non-state customisations
-  const customCount = fields.filter(f => f.key !== 'state' && config[f.key] !== undefined && config[f.key] !== (f.default ?? '')).length
+  const customCount = fields.filter(f => f.key !== 'state' && f.type !== 'callout' && config[f.key] !== undefined && config[f.key] !== (f.default ?? '')).length
 
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -96,8 +107,8 @@ function PolicyRow({ policy, config, onChange }) {
           <p className="text-xs text-gray-500 mb-2">{policy.description}</p>
           <div className="grid grid-cols-2 gap-3">
             {fields.map(field => (
-              <div key={field.key} className={field.type === 'text' && !field.options && fields.length <= 2 ? 'col-span-2' : ''}>
-                <label className="block text-xs font-medium text-gray-600 mb-1">{field.label}</label>
+              <div key={field.key} className={field.type === 'callout' || (field.type === 'text' && !field.options && fields.length <= 2) ? 'col-span-2' : ''}>
+                {field.type !== 'callout' && <label className="block text-xs font-medium text-gray-600 mb-1">{field.label}</label>}
                 <FieldInput
                   field={field}
                   value={config[field.key] ?? (field.default ?? '')}
