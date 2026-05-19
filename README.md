@@ -71,7 +71,7 @@ This starts the Vite dev server for the renderer (port 5173) and launches Electr
 
 Open **Settings** and enter your IT Glue API key. Click **Test Connection** to verify. The app will confirm how many organisations are accessible.
 
-Optionally override the base URL for EU-region IT Glue accounts (`https://api.eu.itglue.com`).
+The base URL defaults to `https://api.eu.itglue.com`. Change this in Settings if your IT Glue account is on a different region.
 
 ### 2. Check PowerShell Modules
 
@@ -93,7 +93,7 @@ Open **Create Policies** and follow the six-step wizard:
 
 1. **Select Organisation** — searchable list of all IT Glue organisations
 2. **Select Credentials** — choose which IT Glue password record to authenticate with
-3. **Configure Prefix** — optionally prepend the organisation name to every policy display name (e.g. `Acme Corp — CA001: Require MFA for All Users`)
+3. **Configure Prefix** — optionally prepend the organisation name to every policy display name (e.g. `AffinityIT — CA001: Require MFA for All Users`)
 4. **Select Policies** — compact 2-column grid grouped by category; select all or pick individually
 5. **Configure** — expand any policy to adjust its state, target users, exclusions, and policy-specific settings; defaults are pre-filled from best practice
 6. **Review & Create** — summary of what will be created

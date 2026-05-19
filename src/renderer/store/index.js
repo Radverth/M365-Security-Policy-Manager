@@ -4,7 +4,7 @@ const useStore = create((set, get) => ({
   // ── Settings ──────────────────────────────────────────────────────────────
   settings: {
     itGlueApiKey: '',
-    itGlueBaseUrl: 'https://api.itglue.com',
+    itGlueBaseUrl: 'https://api.eu.itglue.com',
     defaultPolicyPrefix: '',
     powershellPath: '',
     executionPolicy: 'RemoteSigned',

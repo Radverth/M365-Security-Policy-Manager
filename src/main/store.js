@@ -5,7 +5,7 @@ const store = new Store({
   encryptionKey: 'M365PolicyMgr-2025',
   defaults: {
     itGlueApiKey: '',
-    itGlueBaseUrl: 'https://api.itglue.com',
+    itGlueBaseUrl: 'https://api.eu.itglue.com',
     defaultPolicyPrefix: '',
     powershellPath: '',
     executionPolicy: 'RemoteSigned',

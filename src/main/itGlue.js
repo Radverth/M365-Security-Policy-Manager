@@ -8,7 +8,7 @@ class ItGlueClient {
 
   getClient() {
     const apiKey = store.get('itGlueApiKey')
-    const baseURL = (store.get('itGlueBaseUrl') || 'https://api.itglue.com').replace(/\/$/, '')
+    const baseURL = (store.get('itGlueBaseUrl') || 'https://api.eu.itglue.com').replace(/\/$/, '')
     this._client = axios.create({
       baseURL,
       headers: {
@@ -21,7 +21,7 @@ class ItGlueClient {
   }
 
   async testConnection(apiKey) {
-    const baseURL = (store.get('itGlueBaseUrl') || 'https://api.itglue.com').replace(/\/$/, '')
+    const baseURL = (store.get('itGlueBaseUrl') || 'https://api.eu.itglue.com').replace(/\/$/, '')
     try {
       const resp = await axios.get(`${baseURL}/organizations?page[size]=1`, {
         headers: { 'x-api-key': apiKey, 'Content-Type': 'application/vnd.api+json' },
