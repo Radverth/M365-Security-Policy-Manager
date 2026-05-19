@@ -15,10 +15,11 @@ M365 Security Policy Manager removes the complexity of deploying Microsoft 365 s
 
 **Key capabilities:**
 
-- Deploy all 365 standard security policies in a single guided workflow
+- Deploy 113 security policies across 10 categories in a single guided workflow
+- Load security baselines from Microsoft's official CA policy templates (Secure Foundation, Zero Trust, Remote Workers, Protect Administrators)
 - Pull tenant credentials directly from IT Glue — no manual password entry
-- Manage policies across multiple tenants from one interface
-- Audit existing policies: list, inspect, toggle state, and edit via JSON
+- Manage and audit policies across multiple tenants from one interface
+- Edit tool-managed policies in a structured form; open external policies directly in the Entra portal
 - Full PowerShell module management with streaming install output
 - Ships as a signed Windows EXE and Linux AppImage
 
@@ -26,7 +27,7 @@ M365 Security Policy Manager removes the complexity of deploying Microsoft 365 s
 
 ## Screenshots
 
-> Dashboard · Create Policies wizard · Manage Policies · Modules panel · Settings
+> Dashboard · Create Policies wizard · Manage Policies · Baselines · Modules · Settings
 
 ---
 
@@ -93,37 +94,63 @@ Open **Create Policies** and follow the six-step wizard:
 1. **Select Organisation** — searchable list of all IT Glue organisations
 2. **Select Credentials** — choose which IT Glue password record to authenticate with
 3. **Configure Prefix** — optionally prepend the organisation name to every policy display name (e.g. `Acme Corp — CA001: Require MFA for All Users`)
-4. **Select Policies** — grouped checklist across all 10 categories; select all or pick individually
-5. **Review & Create** — summary of what will be created
-6. **Progress & Results** — live streaming PowerShell output with per-policy success/failure badges
+4. **Select Policies** — compact 2-column grid grouped by category; select all or pick individually
+5. **Configure** — expand any policy to adjust its state, target users, exclusions, and policy-specific settings; defaults are pre-filled from best practice
+6. **Review & Create** — summary of what will be created
+7. **Progress & Results** — live streaming PowerShell output with per-policy success/failure badges
 
-### 4. Manage Policies
+### 4. Baselines
+
+Open **Baselines** to apply a curated set of policies in one click. Four baselines are provided, sourced directly from Microsoft's common CA policy templates on Microsoft Learn:
+
+| Baseline | Description |
+|---|---|
+| **Secure Foundation** | Microsoft's recommended base for all organisations |
+| **Zero Trust** | Risk-based access, device controls, no persistent sessions (requires Entra ID P2) |
+| **Remote Workers** | Device compliance, app protection, and session controls for remote teams |
+| **Protect Administrators** | Phishing-resistant MFA and compliant device requirements for privileged accounts |
+
+Selecting a baseline pre-populates the policy selection in Create Policies so you can review and customise before deploying.
+
+### 5. Manage Policies
 
 Open **Manage Policies**, select a tenant, and the app fetches all existing Conditional Access policies from Microsoft Graph. From here you can:
 
-- Filter by name, category, or status
+- Search and filter by name or status
 - Toggle policy state (Enabled / Report-only / Disabled)
-- Edit the raw policy JSON in the built-in editor
-- Delete policies individually or in bulk
+- Toggle **"Managed by tool"** to show only policies created by this application
+- **Edit** tool-managed policies via a structured form (name, state, conditions summary)
+- **Open in Entra ↗** — non-tool policies show a direct deep link to that policy in the Entra admin centre
+- Delete policies individually
+
+### 6. Security Report
+
+Open **Security Report** to generate a summary of the current security posture across the connected tenant.
 
 ---
 
 ## Policy Categories
 
-365 policies across 10 categories:
+113 deployable policies across 10 categories:
 
-| Category | Range | Count |
+| Category | IDs | Count |
 |---|---|---|
-| Conditional Access | CA001–CA050 | 50 |
-| Identity Protection | IP001–IP030 | 30 |
-| Exchange Online | EX001–EX040 | 40 |
-| SharePoint & OneDrive | SP001–SP030 | 30 |
-| Teams | TE001–TE020 | 20 |
-| Intune / Endpoint | EN001–EN050 | 50 |
-| Defender | DE001–DE040 | 40 |
-| Audit & Compliance | AC001–AC060 | 60 |
-| Admin Security | AS001–AS020 | 20 |
-| Tenant Baseline | TB001–TB025 | 25 |
+| Conditional Access | CA001–CA049 | 39 |
+| Identity Protection | IP001–IP003 | 3 |
+| Exchange Online | EX001–EX036 | 19 |
+| SharePoint & OneDrive | SP001–SP023 | 6 |
+| Teams | TE003–TE017 | 6 |
+| Intune / Endpoint | EN001–EN049 | 15 |
+| Defender | DE001–DE038 | 3 |
+| Audit & Compliance | AC001–AC043 | 8 |
+| Admin Security | AS008–AS019 | 3 |
+| Tenant Baseline | TB002–TB025 | 11 |
+
+> All listed policies deploy directly to the tenant when selected. Policies that cannot be fully automated are excluded.
+
+### Notable policies
+
+- **CA005 — Block All Non-UK Access**: blocks every sign-in from outside the United Kingdom. Creates a UK named location (GB) and a Conditional Access policy that denies access to all users and apps unless the sign-in originates from the UK. Enable only when all users are UK-based.
 
 ---
 
@@ -186,16 +213,18 @@ src/
 │   ├── powershell.js   # PS execution engine (streaming)
 │   ├── moduleManager.js
 │   ├── itGlue.js       # IT Glue API client (Axios)
-│   ├── policyBuilder.js# PowerShell script generator
+│   ├── policyBuilder.js# PowerShell script generator per policy
 │   └── store.js        # electron-store wrapper
 ├── preload/
 │   └── preload.js      # contextBridge API surface
 ├── renderer/           # React + Vite (no Node.js access)
 │   ├── components/     # Shared UI components
-│   ├── pages/          # Dashboard, CreatePolicies, ManagePolicies, Modules, Settings
+│   ├── data/           # baselines.js
+│   ├── pages/          # Dashboard, CreatePolicies, ManagePolicies, SecurityReport,
+│   │                   # Baselines, Modules, Settings
 │   └── store/          # Zustand state slices
 └── shared/
-    └── constants.js    # All 365 policy definitions
+    └── constants.js    # All policy definitions (POLICIES, CATEGORY_FIELDS, POLICY_EXTRA_FIELDS)
 scripts/
 └── install-powershell.sh  # Linux PS Core installer
 .github/workflows/
