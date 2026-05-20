@@ -89,10 +89,11 @@ class PersistentPsSession {
     const loginHint = (authMode !== 'interactive' && credentials?.username)
       ? `-LoginHint '${String(credentials.username).replace(/'/g, "''")}'`
       : ''
+    const scopes = 'Policy.ReadWrite.ConditionalAccess Policy.Read.All DeviceManagementConfiguration.ReadWrite.All Organization.ReadWrite.All Directory.ReadWrite.All RoleManagement.ReadWrite.Directory AuditLog.Read.All'
     const output = await this._exec(`
 try {
   Write-Output "Connecting to Microsoft Graph..."
-  Connect-MgGraph -UseDeviceAuthentication -ContextScope CurrentUser -Scopes "Policy.ReadWrite.ConditionalAccess Policy.Read.All" -NoWelcome ${loginHint} -ErrorAction Stop
+  Connect-MgGraph -UseDeviceAuthentication -ContextScope CurrentUser -Scopes "${scopes}" -NoWelcome ${loginHint} -ErrorAction Stop
   $ctx = Get-MgContext
   if ($ctx) {
     Write-Output "CONTEXT_JSON_START"
