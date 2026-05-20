@@ -11,112 +11,227 @@ const fs = require('fs')
 const psSession = require('./psSession')
 
 
-function escHtml(s) {
-  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-}
 
 function generateReportHtml(orgName, policies, date) {
-  function pickVal(obj, ...keys) {
-    for (const k of keys) { if (obj?.[k] !== undefined && obj?.[k] !== null) return obj[k] }
-    return null
-  }
+  function esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
+  function pick(...keys) { return obj => { for (const k of keys) { if (obj?.[k] != null) return obj[k] } return null } }
+  const pv = (obj, ...keys) => { for (const k of keys) { if (obj?.[k] != null) return obj[k] } return null }
+
+  // ── State helpers ──────────────────────────────────────────────────────────
+  const stateOf = p => p.State || p.state || 'unknown'
+  const stateLabel = s => ({ enabled: 'Enabled', disabled: 'Disabled', enabledForReportingButNotEnforced: 'Report Only' }[s] || 'Unknown')
+  const stateColors = s => ({
+    enabled:                           { bg: '#dcfce7', text: '#15803d', border: '#22c55e', section: '#16a34a' },
+    enabledForReportingButNotEnforced: { bg: '#fef3c7', text: '#b45309', border: '#f59e0b', section: '#d97706' },
+    disabled:                          { bg: '#f3f4f6', text: '#6b7280', border: '#d1d5db', section: '#9ca3af' },
+  }[s] || { bg: '#f3f4f6', text: '#6b7280', border: '#d1d5db', section: '#9ca3af' })
+
+  // ── Formatters ─────────────────────────────────────────────────────────────
+  const PLATFORM_LABELS = { android: 'Android', iOS: 'iOS', macOS: 'macOS', windows: 'Windows', windowsPhone: 'Windows Phone', linux: 'Linux', all: 'All Platforms' }
+  const CLIENT_LABELS   = { browser: 'Browser', mobileAppsAndDesktopClients: 'Mobile & Desktop', exchangeActiveSync: 'Exchange ActiveSync', easSupported: 'EAS (Supported)', other: 'Other Clients', all: 'All Clients' }
+  const RISK_LABELS     = { none: 'None', low: 'Low', medium: 'Medium', high: 'High' }
+  const CTRL_LABELS     = { mfa: 'Require MFA', compliantDevice: 'Require Compliant Device', domainJoinedDevice: 'Require Hybrid Azure AD Join', approvedApplication: 'Require Approved App', compliantApplication: 'Require App Protection Policy', block: 'Block Access', passwordChange: 'Require Password Change' }
 
   function fmtUsers(u) {
-    if (!u) return '—'
-    const inc = pickVal(u, 'IncludeUsers', 'includeUsers') || []
-    const incG = pickVal(u, 'IncludeGroups', 'includeGroups') || []
-    const excU = pickVal(u, 'ExcludeUsers', 'excludeUsers') || []
-    const excG = pickVal(u, 'ExcludeGroups', 'excludeGroups') || []
-    if (inc.includes('All') || inc.includes('all')) {
-      const ex = [...(excU.length ? [`${excU.length} user(s) excl.`] : []), ...(excG.length ? [`${excG.length} groups excl.`] : [])]
-      return ex.length ? `All Users (${ex.join(', ')})` : 'All Users'
-    }
-    const parts = [...(incG.length ? [`${incG.length} group(s)`] : []), ...(inc.length ? [`${inc.length} user(s)`] : [])]
-    return parts.join(', ') || '—'
+    if (!u) return null
+    const incU  = pv(u, 'IncludeUsers', 'includeUsers') || []
+    const excU  = pv(u, 'ExcludeUsers', 'excludeUsers') || []
+    const incG  = pv(u, 'IncludeGroups', 'includeGroups') || []
+    const excG  = pv(u, 'ExcludeGroups', 'excludeGroups') || []
+    const incR  = pv(u, 'IncludeRoles', 'includeRoles') || []
+    const excR  = pv(u, 'ExcludeRoles', 'excludeRoles') || []
+    const parts = []
+    if (incU.some(x => x.toLowerCase() === 'all')) parts.push('All Users')
+    else if (incU.some(x => x.toLowerCase() === 'guestsorexternalusers')) parts.push('Guests & External Users')
+    else if (incU.length) parts.push(`${incU.length} specific user(s)`)
+    if (incR.length) parts.push(`${incR.length} admin role(s)`)
+    if (incG.length) parts.push(`${incG.length} group(s)`)
+    const excParts = [...(excU.length ? [`${excU.length} user(s)`] : []), ...(excG.length ? [`${excG.length} group(s)`] : []), ...(excR.length ? [`${excR.length} role(s)`] : [])]
+    if (!parts.length) return 'None configured'
+    return parts.join(', ') + (excParts.length ? ` — excluding ${excParts.join(', ')}` : '')
   }
 
   function fmtApps(a) {
-    if (!a) return '—'
-    const inc = pickVal(a, 'IncludeApplications', 'includeApplications') || []
-    const exc = pickVal(a, 'ExcludeApplications', 'excludeApplications') || []
-    if (inc.includes('All') || inc.includes('all')) return exc.length ? `All Apps (${exc.length} excl.)` : 'All Apps'
-    return inc.length ? `${inc.length} app(s)` : '—'
+    if (!a) return null
+    const inc = pv(a, 'IncludeApplications', 'includeApplications') || []
+    const exc = pv(a, 'ExcludeApplications', 'excludeApplications') || []
+    if (inc.some(x => x.toLowerCase() === 'all')) return exc.length ? `All Applications (${exc.length} excluded)` : 'All Applications'
+    if (inc.some(x => x === 'Office365')) return 'Microsoft 365 Apps'
+    if (inc.length === 1) return '1 specific application'
+    if (inc.length > 1) return `${inc.length} specific applications`
+    return 'None configured'
   }
 
-  const GRANT_LABELS = {
-    mfa: 'MFA', compliantDevice: 'Compliant Device', domainJoinedDevice: 'Domain-Joined',
-    approvedApplication: 'Approved App', block: 'Block Access', passwordChange: 'Password Change',
-    compliantApplication: 'Compliant App',
+  function fmtPlatforms(p) {
+    if (!p) return null
+    const inc = pv(p, 'IncludePlatforms', 'includePlatforms') || []
+    const exc = pv(p, 'ExcludePlatforms', 'excludePlatforms') || []
+    if (!inc.length) return null
+    if (inc.some(x => x.toLowerCase() === 'all')) return exc.length ? `All Platforms (excluding ${exc.map(x => PLATFORM_LABELS[x] || x).join(', ')})` : 'All Platforms'
+    return inc.map(x => PLATFORM_LABELS[x] || x).join(', ')
+  }
+
+  function fmtLocations(l) {
+    if (!l) return null
+    const inc = pv(l, 'IncludeLocations', 'includeLocations') || []
+    const exc = pv(l, 'ExcludeLocations', 'excludeLocations') || []
+    if (!inc.length) return null
+    if (inc.includes('All')) return exc.length ? `All Locations (${exc.length} location(s) excluded)` : 'All Locations'
+    if (inc.includes('AllTrusted')) return exc.length ? `All Trusted Locations (${exc.length} excluded)` : 'All Trusted Locations'
+    return `${inc.length} specific location(s)${exc.length ? ` (${exc.length} excluded)` : ''}`
   }
 
   function fmtGrant(g) {
-    if (!g) return '—'
-    const controls = (pickVal(g, 'BuiltInControls', 'builtInControls') || []).map(c => GRANT_LABELS[c] || c)
-    return controls.join(' / ') || '—'
+    if (!g) return null
+    const controls = (pv(g, 'BuiltInControls', 'builtInControls') || []).map(c => CTRL_LABELS[c] || c)
+    const strength = pv(g, 'AuthenticationStrength', 'authenticationStrength')
+    if (strength) controls.push('Authentication Strength (phishing-resistant)')
+    if (!controls.length) return null
+    const op = (pv(g, 'Operator', 'operator') || 'OR').toUpperCase()
+    return controls.join(` ${op} `)
   }
 
-  function stateStyle(state) {
-    if (state === 'enabled') return 'background:#dcfce7;color:#15803d'
-    if (state === 'disabled') return 'background:#f3f4f6;color:#6b7280'
-    if (state === 'enabledForReportingButNotEnforced') return 'background:#fef3c7;color:#d97706'
-    return 'background:#f3f4f6;color:#6b7280'
+  function fmtSession(s) {
+    if (!s) return null
+    const parts = []
+    const sf = pv(s, 'SignInFrequency', 'signInFrequency')
+    if (sf && (sf.isEnabled || sf.IsEnabled)) {
+      const val = sf.value ?? sf.Value, type = sf.type || sf.Type
+      parts.push(val && type ? `Sign-in frequency: every ${val} ${type}` : 'Sign-in frequency enforced')
+    }
+    const pb = pv(s, 'PersistentBrowser', 'persistentBrowser')
+    if (pb && (pb.isEnabled || pb.IsEnabled)) parts.push(`Persistent browser: ${pb.mode || pb.Mode || 'configured'}`)
+    const ar = pv(s, 'ApplicationEnforcedRestrictions', 'applicationEnforcedRestrictions')
+    if (ar && (ar.isEnabled || ar.IsEnabled)) parts.push('App-enforced restrictions enabled')
+    return parts.length ? parts.join('; ') : null
   }
 
-  function stateLabel(state) {
-    if (state === 'enabled') return 'Enabled'
-    if (state === 'disabled') return 'Disabled'
-    if (state === 'enabledForReportingButNotEnforced') return 'Report Only'
-    return state || 'Unknown'
+  function fmtClientApps(types) {
+    if (!types?.length) return null
+    return types.map(t => CLIENT_LABELS[t] || t).join(', ')
   }
 
-  function leftBorder(state) {
-    if (state === 'enabled') return '#22c55e'
-    if (state === 'disabled') return '#e5e7eb'
-    if (state === 'enabledForReportingButNotEnforced') return '#f59e0b'
-    return '#e5e7eb'
+  function fmtRisk(levels) {
+    if (!levels?.length) return null
+    return levels.map(l => RISK_LABELS[l] || l).join(', ')
   }
 
-  const enabled = policies.filter(p => (p.State || p.state) === 'enabled').length
-  const reportOnly = policies.filter(p => (p.State || p.state) === 'enabledForReportingButNotEnforced').length
-  const disabled = policies.filter(p => (p.State || p.state) === 'disabled').length
+  function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' }
 
-  const rows = policies.map((p, i) => {
-    const state = p.State || p.state || 'unknown'
-    const name = p.DisplayName || p.displayName || 'Unnamed'
-    const id = p.Id || p.id || ''
-    const cond = pickVal(p, 'Conditions', 'conditions') || {}
-    const users = fmtUsers(pickVal(cond, 'Users', 'users'))
-    const apps = fmtApps(pickVal(cond, 'Applications', 'applications'))
-    const grant = fmtGrant(pickVal(p, 'GrantControls', 'grantControls'))
-    const modified = (p.ModifiedDateTime || p.modifiedDateTime)
-      ? new Date(p.ModifiedDateTime || p.modifiedDateTime).toLocaleDateString('en-GB') : '—'
-    const rowBg = i % 2 === 0 ? '#ffffff' : '#f9fafb'
-    const border = leftBorder(state)
-    return `<tr style="background:${rowBg}">
-      <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;border-left:3px solid ${border}">
-        <div style="font-size:11px;font-weight:600;color:#111827;line-height:1.3">${escHtml(name)}</div>
-        <div style="font-size:9px;color:#d1d5db;font-family:monospace;margin-top:2px">${escHtml(id)}</div>
-      </td>
-      <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;white-space:nowrap">
-        <span style="display:inline-block;padding:2px 8px;border-radius:9999px;font-size:9px;font-weight:700;${stateStyle(state)}">${stateLabel(state)}</span>
-      </td>
-      <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#374151">${escHtml(users)}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#374151">${escHtml(apps)}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#374151">${escHtml(grant)}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#9ca3af;white-space:nowrap">${modified}</td>
+  // ── Detail row ─────────────────────────────────────────────────────────────
+  function detailRow(label, value) {
+    if (!value) return ''
+    return `<tr>
+      <td style="padding:5px 12px 5px 0;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:#9ca3af;white-space:nowrap;vertical-align:top;width:110px">${esc(label)}</td>
+      <td style="padding:5px 0;font-size:11px;color:#1f2937;line-height:1.45">${esc(value)}</td>
     </tr>`
-  }).join('')
+  }
+
+  // ── Policy card ────────────────────────────────────────────────────────────
+  function policyCard(p) {
+    const state  = stateOf(p)
+    const colors = stateColors(state)
+    const name   = esc(pv(p, 'DisplayName', 'displayName') || 'Unnamed Policy')
+    const id     = esc(pv(p, 'Id', 'id') || '')
+    const cond   = pv(p, 'Conditions', 'conditions') || {}
+
+    const users      = fmtUsers(pv(cond, 'Users', 'users'))
+    const apps       = fmtApps(pv(cond, 'Applications', 'applications'))
+    const platforms  = fmtPlatforms(pv(cond, 'Platforms', 'platforms'))
+    const locations  = fmtLocations(pv(cond, 'Locations', 'locations'))
+    const clientApps = fmtClientApps(pv(cond, 'ClientAppTypes', 'clientAppTypes'))
+    const signRisk   = fmtRisk(pv(cond, 'SignInRiskLevels', 'signInRiskLevels'))
+    const userRisk   = fmtRisk(pv(cond, 'UserRiskLevels', 'userRiskLevels'))
+    const grant      = fmtGrant(pv(p, 'GrantControls', 'grantControls'))
+    const session    = fmtSession(pv(p, 'SessionControls', 'sessionControls'))
+    const created    = fmtDate(pv(p, 'CreatedDateTime', 'createdDateTime'))
+    const modified   = fmtDate(pv(p, 'ModifiedDateTime', 'modifiedDateTime'))
+
+    const hasConditions = users || apps || platforms || locations || clientApps || signRisk || userRisk
+    const hasControls   = grant || session
+
+    return `<div style="margin-bottom:14px;page-break-inside:avoid;border:1px solid #e5e7eb;border-left:5px solid ${colors.border};border-radius:8px;background:#fff;overflow:hidden">
+      <div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;padding:12px 16px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border-bottom:1px solid #f3f4f6">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#111827;line-height:1.35">${name}</div>
+          <div style="font-size:9px;color:#d1d5db;font-family:monospace;margin-top:3px">${id}</div>
+        </div>
+        <span style="-webkit-print-color-adjust:exact;print-color-adjust:exact;flex-shrink:0;display:inline-block;padding:3px 10px;border-radius:9999px;font-size:9px;font-weight:700;letter-spacing:0.5px;background:${colors.bg};color:${colors.text}">${stateLabel(state)}</span>
+      </div>
+      <div style="padding:10px 16px;display:grid;grid-template-columns:1fr 1fr;gap:0 32px">
+        ${hasConditions ? `<div>
+          <div style="font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#1a2d4a;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #f3f4f6">Scope &amp; Conditions</div>
+          <table style="width:100%;border-collapse:collapse">
+            ${detailRow('Users', users)}
+            ${detailRow('Applications', apps)}
+            ${detailRow('Platforms', platforms)}
+            ${detailRow('Locations', locations)}
+            ${detailRow('Client Apps', clientApps)}
+            ${detailRow('Sign-in Risk', signRisk)}
+            ${detailRow('User Risk', userRisk)}
+          </table>
+        </div>` : '<div></div>'}
+        <div>
+          ${hasControls ? `<div style="font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#1a2d4a;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #f3f4f6">Access Controls</div>
+          <table style="width:100%;border-collapse:collapse">
+            ${detailRow('Grant', grant)}
+            ${detailRow('Session', session)}
+          </table>` : ''}
+          <div style="margin-top:${hasControls ? '12' : '0'}px;font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#1a2d4a;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #f3f4f6">Timeline</div>
+          <table style="width:100%;border-collapse:collapse">
+            ${detailRow('Created', created)}
+            ${detailRow('Modified', modified)}
+          </table>
+        </div>
+      </div>
+    </div>`
+  }
+
+  // ── Section block ──────────────────────────────────────────────────────────
+  function section(label, sectionPolicies, colorHex) {
+    if (!sectionPolicies.length) return ''
+    return `<div style="margin-bottom:24px">
+      <div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #f3f4f6">
+        <span style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:inline-block;width:10px;height:10px;border-radius:50%;background:${colorHex};flex-shrink:0"></span>
+        <span style="font-size:12px;font-weight:700;color:#1a2d4a;letter-spacing:0.3px">${esc(label)}</span>
+        <span style="font-size:11px;color:#9ca3af">(${sectionPolicies.length})</span>
+      </div>
+      ${sectionPolicies.map(policyCard).join('')}
+    </div>`
+  }
+
+  // ── Stats summary ──────────────────────────────────────────────────────────
+  const enabled    = policies.filter(p => stateOf(p) === 'enabled')
+  const reportOnly = policies.filter(p => stateOf(p) === 'enabledForReportingButNotEnforced')
+  const disabled   = policies.filter(p => stateOf(p) === 'disabled')
 
   const statCards = [
     { label: 'Total Policies', value: policies.length, color: '#1a2d4a' },
-    { label: 'Enabled', value: enabled, color: '#16a34a' },
-    { label: 'Report Only', value: reportOnly, color: '#d97706' },
-    { label: 'Disabled', value: disabled, color: '#9ca3af' },
-  ].map(s => `
-    <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:18px;text-align:center">
-      <div style="font-size:30px;font-weight:700;color:${s.color};line-height:1">${s.value}</div>
-      <div style="font-size:9px;font-weight:600;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:0.5px">${s.label}</div>
-    </div>`).join('')
+    { label: 'Enabled',        value: enabled.length,  color: '#16a34a' },
+    { label: 'Report Only',    value: reportOnly.length, color: '#d97706' },
+    { label: 'Disabled',       value: disabled.length,  color: '#9ca3af' },
+  ].map(s => `<div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#f9fafb;border:1px solid #e5e7eb;border-top:3px solid ${s.color};border-radius:8px;padding:16px 12px;text-align:center">
+    <div style="font-size:32px;font-weight:700;color:${s.color};line-height:1">${s.value}</div>
+    <div style="font-size:9px;font-weight:700;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:0.8px">${s.label}</div>
+  </div>`).join('')
+
+  // ── Overview table (compact, one row per policy) ───────────────────────────
+  const overviewRows = policies.map((p, i) => {
+    const state  = stateOf(p)
+    const colors = stateColors(state)
+    const name   = esc(pv(p, 'DisplayName', 'displayName') || 'Unnamed')
+    const users  = esc(fmtUsers(pv(pv(p, 'Conditions', 'conditions'), 'Users', 'users')) || '—')
+    const grant  = esc(fmtGrant(pv(p, 'GrantControls', 'grantControls')) || '—')
+    const bg = i % 2 === 0 ? '#fff' : '#f9fafb'
+    return `<tr style="-webkit-print-color-adjust:exact;print-color-adjust:exact;background:${bg}">
+      <td style="padding:6px 10px;font-size:10px;font-weight:600;color:#111827;border-bottom:1px solid #f3f4f6;border-left:3px solid ${colors.border}">${name}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;white-space:nowrap">
+        <span style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:inline-block;padding:2px 7px;border-radius:9999px;font-size:8.5px;font-weight:700;background:${colors.bg};color:${colors.text}">${stateLabel(state)}</span>
+      </td>
+      <td style="padding:6px 10px;font-size:9.5px;color:#374151;border-bottom:1px solid #f3f4f6">${users}</td>
+      <td style="padding:6px 10px;font-size:9.5px;color:#374151;border-bottom:1px solid #f3f4f6">${grant}</td>
+    </tr>`
+  }).join('')
 
   return `<!DOCTYPE html>
 <html>
@@ -124,69 +239,81 @@ function generateReportHtml(orgName, policies, date) {
 <meta charset="UTF-8">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-@page { margin: 15mm 12mm; size: A4 portrait; }
+@page { margin: 14mm 12mm; size: A4 portrait; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: #fff; color: #1f2937; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 table { width: 100%; border-collapse: collapse; }
-.page-break { page-break-before: always; padding-top: 8px; }
-.cover { min-height: 250mm; display: flex; flex-direction: column; gap: 28px; }
+.break { page-break-before: always; }
 </style>
 </head>
 <body>
-<div class="cover">
-  <div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#1a2d4a;border-radius:12px;overflow:hidden">
+
+<!-- ═══ COVER PAGE ═══════════════════════════════════════════════════════════ -->
+<div style="min-height:257mm;display:flex;flex-direction:column;gap:22px">
+
+  <!-- Branding header -->
+  <div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#1a2d4a;border-radius:10px;overflow:hidden">
     <div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;height:5px;background:linear-gradient(90deg,#b87820 0%,#E8A830 35%,#f5d080 65%,#E8A830 100%)"></div>
-    <div style="padding:30px 38px 34px">
+    <div style="padding:28px 36px 32px">
       <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:24px">
-        <div style="flex-shrink:0">
-          <div style="font-size:36px;font-weight:200;color:#ffffff;letter-spacing:-1.5px;line-height:1">affinity</div>
-          <div style="font-size:11px;color:#E8A830;margin-top:8px;letter-spacing:0.5px;font-weight:400">Technology. Together.</div>
+        <div>
+          <div style="font-size:34px;font-weight:200;color:#fff;letter-spacing:-1.5px;line-height:1">affinity</div>
+          <div style="font-size:10px;color:#E8A830;margin-top:6px;letter-spacing:0.5px">Technology. Together.</div>
         </div>
-        <div style="flex:1;border-bottom:1px solid rgba(255,255,255,0.12);margin-bottom:6px"></div>
-        <div style="text-align:right;flex-shrink:0">
-          <div style="font-size:9px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:rgba(255,255,255,0.35);margin-bottom:10px">M365 Security Policy Report</div>
-          <div style="font-size:22px;font-weight:600;color:#ffffff;line-height:1.2;margin-bottom:5px">${escHtml(orgName || 'Tenant')}</div>
-          <div style="font-size:12px;color:rgba(255,255,255,0.55)">${escHtml(date)}</div>
+        <div style="flex:1;border-bottom:1px solid rgba(255,255,255,0.1);margin-bottom:5px"></div>
+        <div style="text-align:right">
+          <div style="font-size:8.5px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:rgba(255,255,255,0.35);margin-bottom:8px">M365 Security Policy Report</div>
+          <div style="font-size:24px;font-weight:600;color:#fff;line-height:1.2;margin-bottom:5px">${esc(orgName || 'Tenant Report')}</div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.5)">Generated ${esc(date)}</div>
         </div>
       </div>
     </div>
   </div>
 
-  <div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+  <!-- Stats -->
+  <div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
     ${statCards}
   </div>
 
-  <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px">
-    <span style="font-size:11px;font-weight:600;color:#374151">Note: </span>
-    <span style="font-size:11px;color:#6b7280">This report covers Conditional Access policies only. GUIDs shown where display names are unavailable.</span>
+  <!-- Overview table -->
+  <div>
+    <div style="font-size:11px;font-weight:700;color:#1a2d4a;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Policy Overview</div>
+    <table>
+      <thead>
+        <tr style="-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#f3f4f6">
+          <th style="padding:7px 10px;text-align:left;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;border-bottom:2px solid #e5e7eb">Policy Name</th>
+          <th style="padding:7px 10px;text-align:left;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;border-bottom:2px solid #e5e7eb;white-space:nowrap">Status</th>
+          <th style="padding:7px 10px;text-align:left;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;border-bottom:2px solid #e5e7eb">Users</th>
+          <th style="padding:7px 10px;text-align:left;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;border-bottom:2px solid #e5e7eb">Grant Controls</th>
+        </tr>
+      </thead>
+      <tbody>${overviewRows}</tbody>
+    </table>
+  </div>
+
+  <!-- Footer note -->
+  <div style="margin-top:auto;padding:10px 14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px">
+    <p style="font-size:9px;color:#9ca3af">This report covers Conditional Access policies. Full policy details are on the following pages. &middot; Confidential &mdash; ${esc(orgName || 'Tenant')}</p>
   </div>
 </div>
 
-<div class="page-break">
-  <div style="margin-bottom:14px;display:flex;align-items:baseline;justify-content:space-between">
+<!-- ═══ DETAIL PAGES ════════════════════════════════════════════════════════ -->
+<div class="break">
+  <div style="margin-bottom:18px;display:flex;align-items:baseline;justify-content:space-between">
     <div>
-      <div style="font-size:14px;font-weight:700;color:#1a2d4a">Conditional Access Policies</div>
-      <div style="font-size:10px;color:#9ca3af;margin-top:2px">${policies.length} policies &mdash; ${escHtml(date)}</div>
+      <div style="font-size:15px;font-weight:700;color:#1a2d4a">Conditional Access — Policy Details</div>
+      <div style="font-size:10px;color:#9ca3af;margin-top:2px">${policies.length} policies &mdash; ${esc(orgName || 'Tenant')} &mdash; ${esc(date)}</div>
     </div>
   </div>
 
-  <table>
-    <thead>
-      <tr style="-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#f3f4f6">
-        <th style="padding:8px 12px;text-align:left;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;border-bottom:2px solid #e5e7eb">Policy Name</th>
-        <th style="padding:8px 12px;text-align:left;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;border-bottom:2px solid #e5e7eb;white-space:nowrap">Status</th>
-        <th style="padding:8px 12px;text-align:left;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;border-bottom:2px solid #e5e7eb">Users</th>
-        <th style="padding:8px 12px;text-align:left;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;border-bottom:2px solid #e5e7eb">Applications</th>
-        <th style="padding:8px 12px;text-align:left;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;border-bottom:2px solid #e5e7eb">Grant Controls</th>
-        <th style="padding:8px 12px;text-align:left;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#6b7280;border-bottom:2px solid #e5e7eb;white-space:nowrap">Modified</th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>
+  ${section('Enabled', enabled, '#22c55e')}
+  ${section('Report Only', reportOnly, '#f59e0b')}
+  ${section('Disabled', disabled, '#d1d5db')}
 
-  <div style="margin-top:20px;padding:10px 14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px">
-    <p style="font-size:9px;color:#9ca3af">Generated by M365 Security Policy Manager &middot; Affinity Technology &middot; ${escHtml(date)} &middot; Confidential</p>
+  <div style="margin-top:16px;padding:10px 14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px">
+    <p style="font-size:9px;color:#9ca3af">Generated by M365 Security Policy Manager &middot; Affinity Technology &middot; ${esc(date)} &middot; Confidential</p>
   </div>
 </div>
+
 </body>
 </html>`
 }
