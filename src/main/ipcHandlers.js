@@ -353,9 +353,8 @@ function registerIpcHandlers(win) {
     const logs = []
     const results = {}
 
-    const onLine = (line) => {
+    const parseResult = (line) => {
       logs.push(line)
-      win.webContents.send('ps:output', line)
       if (line.startsWith('SUCCESS:')) {
         const id = line.match(/[A-Z]{2}\d{3}/)?.[0]
         if (id) results[id] = 'success'
@@ -370,20 +369,23 @@ function registerIpcHandlers(win) {
 
     // If a persistent authenticated session exists and no EXO/IPPS connections are
     // needed, run the policy blocks directly through the session — no re-auth required.
+    // psSession's global stdout handler already streams every line to ps:output, so
+    // parseResult must NOT re-send or each line would appear twice in the terminal.
     if (psSession.alive && !hasExo && !hasIpps) {
       logger.info('IPC: policies:create — using persistent session (no re-auth)')
       win.webContents.send('ps:output', 'CONNECTED: Using active tenant session — deploying policies...')
       const script = buildPoliciesScript(policies, prefix || '', policyConfigs || {})
-      await psSession.run(script, onLine, 300000)
+      await psSession.run(script, parseResult, 300000)
       return { logs, results }
     }
 
-    // Fall back to a new process with full auth (EXO/IPPS policies, or no session)
+    // Fall back to a new process with full auth (EXO/IPPS policies, or no session).
+    // This spawns a fresh pwsh with no global handler, so we must forward lines ourselves.
     logger.info('IPC: policies:create — spawning new process with full auth')
     const script = buildScript(policies, credentials, prefix, authMode, policyConfigs || {}, { useDeviceCode })
     await runScript(
       script,
-      onLine,
+      (line) => { win.webContents.send('ps:output', line); parseResult(line) },
       (line) => win.webContents.send('ps:error', line)
     )
 
