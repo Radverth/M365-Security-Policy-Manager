@@ -4,7 +4,6 @@ import Card from '../components/Card'
 import Button from '../components/Button'
 import Badge from '../components/Badge'
 import Modal from '../components/Modal'
-import SlideOver from '../components/SlideOver'
 import SearchInput from '../components/SearchInput'
 import LogPanel from '../components/LogPanel'
 
@@ -100,7 +99,7 @@ function PolicyEditor({ policy, onSave, onCancel, saving }) {
   const inputCls = 'block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy'
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="pt-2 pb-4 space-y-5">
       <div className="space-y-4">
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Display Name</label>
@@ -635,14 +634,19 @@ export default function ManagePolicies() {
         </p>
       </Modal>
 
-      <SlideOver open={!!editTarget} onClose={() => setEditTarget(null)} title={editTarget ? `Edit: ${editTarget.DisplayName}` : 'Edit Policy'}>
+      <Modal
+        open={!!editTarget}
+        onClose={() => setEditTarget(null)}
+        title={editTarget ? `Edit: ${editTarget.DisplayName || editTarget.displayName}` : 'Edit Policy'}
+        size="xl"
+      >
         <PolicyEditor
           policy={editTarget}
           onSave={handleSaveEdit}
           onCancel={() => setEditTarget(null)}
           saving={saveLoading}
         />
-      </SlideOver>
+      </Modal>
     </div>
   )
 }

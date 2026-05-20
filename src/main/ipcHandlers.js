@@ -402,11 +402,8 @@ function registerIpcHandlers(win) {
     const patchJson = JSON.stringify(patch)
     const script = `
 try {
-  $patchJson = @'
-${patchJson}
-'@
-  $params = $patchJson | ConvertFrom-Json -AsHashtable
-  Invoke-MgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies/${safeId}" -Body ($params | ConvertTo-Json -Depth 10) -ContentType 'application/json'
+  $body = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${Buffer.from(patchJson).toString('base64')}'))
+  Invoke-MgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies/${safeId}" -Body $body -ContentType 'application/json'
   Write-Output "SUCCESS"
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
