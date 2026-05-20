@@ -122,8 +122,8 @@ function generateReportHtml(orgName, policies, date) {
   function detailRow(label, value) {
     if (!value) return ''
     return `<tr>
-      <td style="padding:5px 12px 5px 0;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:#9ca3af;white-space:nowrap;vertical-align:top;width:110px">${esc(label)}</td>
-      <td style="padding:5px 0;font-size:11px;color:#1f2937;line-height:1.45">${esc(value)}</td>
+      <td style="padding:5px 14px 5px 0;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#9ca3af;white-space:nowrap;vertical-align:top;width:120px">${esc(label)}</td>
+      <td style="padding:5px 0;font-size:12px;color:#1f2937;line-height:1.5">${esc(value)}</td>
     </tr>`
   }
 
@@ -150,17 +150,19 @@ function generateReportHtml(orgName, policies, date) {
     const hasConditions = users || apps || platforms || locations || clientApps || signRisk || userRisk
     const hasControls   = grant || session
 
-    return `<div style="margin-bottom:14px;page-break-inside:avoid;border:1px solid #e5e7eb;border-left:5px solid ${colors.border};border-radius:8px;background:#fff;overflow:hidden">
-      <div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;padding:12px 16px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border-bottom:1px solid #f3f4f6">
+    const subHdr = `font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.8px;color:#1a2d4a;margin-bottom:7px;padding-bottom:5px;border-bottom:1px solid #f3f4f6`
+
+    return `<div style="margin-bottom:16px;page-break-inside:avoid;border:1px solid #e5e7eb;border-left:5px solid ${colors.border};border-radius:8px;background:#fff;overflow:hidden">
+      <div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;padding:13px 18px;display:flex;align-items:flex-start;justify-content:space-between;gap:14px;border-bottom:1px solid #f3f4f6">
         <div>
-          <div style="font-size:13px;font-weight:700;color:#111827;line-height:1.35">${name}</div>
-          <div style="font-size:9px;color:#d1d5db;font-family:monospace;margin-top:3px">${id}</div>
+          <div style="font-size:14px;font-weight:700;color:#111827;line-height:1.35">${name}</div>
+          <div style="font-size:10px;color:#d1d5db;font-family:'Courier New',Courier,monospace;margin-top:4px;letter-spacing:0.3px">${id}</div>
         </div>
-        <span style="-webkit-print-color-adjust:exact;print-color-adjust:exact;flex-shrink:0;display:inline-block;padding:3px 10px;border-radius:9999px;font-size:9px;font-weight:700;letter-spacing:0.5px;background:${colors.bg};color:${colors.text}">${stateLabel(state)}</span>
+        <span style="-webkit-print-color-adjust:exact;print-color-adjust:exact;flex-shrink:0;display:inline-block;padding:4px 12px;border-radius:9999px;font-size:10px;font-weight:700;letter-spacing:0.4px;background:${colors.bg};color:${colors.text}">${stateLabel(state)}</span>
       </div>
-      <div style="padding:10px 16px;display:grid;grid-template-columns:1fr 1fr;gap:0 32px">
+      <div style="padding:12px 18px;display:grid;grid-template-columns:1fr 1fr;gap:0 36px">
         ${hasConditions ? `<div>
-          <div style="font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#1a2d4a;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #f3f4f6">Scope &amp; Conditions</div>
+          <div style="${subHdr}">Scope &amp; Conditions</div>
           <table style="width:100%;border-collapse:collapse">
             ${detailRow('Users', users)}
             ${detailRow('Applications', apps)}
@@ -172,12 +174,13 @@ function generateReportHtml(orgName, policies, date) {
           </table>
         </div>` : '<div></div>'}
         <div>
-          ${hasControls ? `<div style="font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#1a2d4a;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #f3f4f6">Access Controls</div>
+          ${hasControls ? `<div style="${subHdr}">Access Controls</div>
           <table style="width:100%;border-collapse:collapse">
             ${detailRow('Grant', grant)}
             ${detailRow('Session', session)}
-          </table>` : ''}
-          <div style="margin-top:${hasControls ? '12' : '0'}px;font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#1a2d4a;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #f3f4f6">Timeline</div>
+          </table>
+          <div style="margin-top:14px"></div>` : ''}
+          <div style="${subHdr}">Timeline</div>
           <table style="width:100%;border-collapse:collapse">
             ${detailRow('Created', created)}
             ${detailRow('Modified', modified)}
@@ -190,11 +193,11 @@ function generateReportHtml(orgName, policies, date) {
   // ── Section block ──────────────────────────────────────────────────────────
   function section(label, sectionPolicies, colorHex) {
     if (!sectionPolicies.length) return ''
-    return `<div style="margin-bottom:24px">
-      <div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #f3f4f6">
-        <span style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:inline-block;width:10px;height:10px;border-radius:50%;background:${colorHex};flex-shrink:0"></span>
-        <span style="font-size:12px;font-weight:700;color:#1a2d4a;letter-spacing:0.3px">${esc(label)}</span>
-        <span style="font-size:11px;color:#9ca3af">(${sectionPolicies.length})</span>
+    return `<div style="margin-bottom:28px">
+      <div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:9px;border-bottom:2px solid #f3f4f6">
+        <span style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:inline-block;width:11px;height:11px;border-radius:50%;background:${colorHex};flex-shrink:0"></span>
+        <span style="font-size:13px;font-weight:700;color:#1a2d4a;letter-spacing:0.2px">${esc(label)}</span>
+        <span style="font-size:12px;color:#9ca3af">(${sectionPolicies.length})</span>
       </div>
       ${sectionPolicies.map(policyCard).join('')}
     </div>`
@@ -210,9 +213,9 @@ function generateReportHtml(orgName, policies, date) {
     { label: 'Enabled',        value: enabled.length,  color: '#16a34a' },
     { label: 'Report Only',    value: reportOnly.length, color: '#d97706' },
     { label: 'Disabled',       value: disabled.length,  color: '#9ca3af' },
-  ].map(s => `<div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#f9fafb;border:1px solid #e5e7eb;border-top:3px solid ${s.color};border-radius:8px;padding:16px 12px;text-align:center">
-    <div style="font-size:32px;font-weight:700;color:${s.color};line-height:1">${s.value}</div>
-    <div style="font-size:9px;font-weight:700;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:0.8px">${s.label}</div>
+  ].map(s => `<div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#f9fafb;border:1px solid #e5e7eb;border-top:3px solid ${s.color};border-radius:8px;padding:18px 12px;text-align:center">
+    <div style="font-size:34px;font-weight:700;color:${s.color};line-height:1">${s.value}</div>
+    <div style="font-size:10px;font-weight:700;color:#9ca3af;margin-top:9px;text-transform:uppercase;letter-spacing:0.8px">${s.label}</div>
   </div>`).join('')
 
   // ── Overview table (compact, one row per policy) ───────────────────────────
@@ -224,12 +227,12 @@ function generateReportHtml(orgName, policies, date) {
     const grant  = esc(fmtGrant(pv(p, 'GrantControls', 'grantControls')) || '—')
     const bg = i % 2 === 0 ? '#fff' : '#f9fafb'
     return `<tr style="-webkit-print-color-adjust:exact;print-color-adjust:exact;background:${bg}">
-      <td style="padding:6px 10px;font-size:10px;font-weight:600;color:#111827;border-bottom:1px solid #f3f4f6;border-left:3px solid ${colors.border}">${name}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;white-space:nowrap">
-        <span style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:inline-block;padding:2px 7px;border-radius:9999px;font-size:8.5px;font-weight:700;background:${colors.bg};color:${colors.text}">${stateLabel(state)}</span>
+      <td style="padding:7px 10px;font-size:11px;font-weight:600;color:#111827;border-bottom:1px solid #f3f4f6;border-left:3px solid ${colors.border}">${name}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #f3f4f6;white-space:nowrap">
+        <span style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:inline-block;padding:3px 8px;border-radius:9999px;font-size:9.5px;font-weight:700;background:${colors.bg};color:${colors.text}">${stateLabel(state)}</span>
       </td>
-      <td style="padding:6px 10px;font-size:9.5px;color:#374151;border-bottom:1px solid #f3f4f6">${users}</td>
-      <td style="padding:6px 10px;font-size:9.5px;color:#374151;border-bottom:1px solid #f3f4f6">${grant}</td>
+      <td style="padding:7px 10px;font-size:11px;color:#374151;border-bottom:1px solid #f3f4f6">${users}</td>
+      <td style="padding:7px 10px;font-size:11px;color:#374151;border-bottom:1px solid #f3f4f6">${grant}</td>
     </tr>`
   }).join('')
 
@@ -239,16 +242,17 @@ function generateReportHtml(orgName, policies, date) {
 <meta charset="UTF-8">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-@page { margin: 14mm 12mm; size: A4 portrait; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: #fff; color: #1f2937; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+@page { margin: 15mm 13mm; size: A4 portrait; }
+body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif; font-size: 13px; line-height: 1.55; background: #fff; color: #1f2937; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 table { width: 100%; border-collapse: collapse; }
+p { margin: 0; }
 .break { page-break-before: always; }
 </style>
 </head>
 <body>
 
 <!-- ═══ COVER PAGE ═══════════════════════════════════════════════════════════ -->
-<div style="min-height:257mm;display:flex;flex-direction:column;gap:22px">
+<div style="min-height:257mm;display:flex;flex-direction:column;gap:20px">
 
   <!-- Branding header -->
   <div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#1a2d4a;border-radius:10px;overflow:hidden">
@@ -257,13 +261,13 @@ table { width: 100%; border-collapse: collapse; }
       <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:24px">
         <div>
           <div style="font-size:34px;font-weight:200;color:#fff;letter-spacing:-1.5px;line-height:1">affinity</div>
-          <div style="font-size:10px;color:#E8A830;margin-top:6px;letter-spacing:0.5px">Technology. Together.</div>
+          <div style="font-size:11px;color:#E8A830;margin-top:7px;letter-spacing:0.5px">Technology. Together.</div>
         </div>
         <div style="flex:1;border-bottom:1px solid rgba(255,255,255,0.1);margin-bottom:5px"></div>
         <div style="text-align:right">
-          <div style="font-size:8.5px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:rgba(255,255,255,0.35);margin-bottom:8px">M365 Security Policy Report</div>
-          <div style="font-size:24px;font-weight:600;color:#fff;line-height:1.2;margin-bottom:5px">${esc(orgName || 'Tenant Report')}</div>
-          <div style="font-size:11px;color:rgba(255,255,255,0.5)">Generated ${esc(date)}</div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:rgba(255,255,255,0.35);margin-bottom:8px">M365 Security Policy Report</div>
+          <div style="font-size:24px;font-weight:600;color:#fff;line-height:1.2;margin-bottom:6px">${esc(orgName || 'Tenant Report')}</div>
+          <div style="font-size:12px;color:rgba(255,255,255,0.5)">Generated ${esc(date)}</div>
         </div>
       </div>
     </div>
@@ -274,43 +278,72 @@ table { width: 100%; border-collapse: collapse; }
     ${statCards}
   </div>
 
+  <!-- About this report -->
+  <div style="border:1px solid #e5e7eb;border-radius:8px;padding:18px 22px;background:#f9fafb">
+    <div style="font-size:13px;font-weight:700;color:#1a2d4a;margin-bottom:10px">About This Report</div>
+    <p style="font-size:12px;color:#374151;line-height:1.65;margin-bottom:10px">
+      This report provides a complete snapshot of the Microsoft 365 Conditional Access policies configured in the <strong>${esc(orgName || 'tenant')}</strong> environment, generated on ${esc(date)}.
+    </p>
+    <p style="font-size:12px;color:#374151;line-height:1.65;margin-bottom:10px">
+      <strong>Conditional Access</strong> is the Microsoft Entra ID (Azure AD) security mechanism that controls who can access which cloud applications, under what conditions, and from which devices or locations. Each policy defines a set of conditions (scope) and a resulting action (grant or block access).
+    </p>
+    <p style="font-size:12px;color:#374151;line-height:1.65;margin-bottom:14px">
+      The full policy detail section (following pages) groups policies by status and shows all configured conditions — including users, applications, device platforms, network locations, sign-in risk levels, and access controls such as MFA requirements.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div style="font-size:11px;font-weight:700;color:#374151;margin-right:4px;line-height:2">Policy status:</div>
+      ${[
+        { label: 'Enabled', bg: '#dcfce7', text: '#15803d', desc: 'Actively enforced on sign-in' },
+        { label: 'Report Only', bg: '#fef3c7', text: '#b45309', desc: 'Evaluated but not enforced (audit mode)' },
+        { label: 'Disabled', bg: '#f3f4f6', text: '#6b7280', desc: 'Inactive — not evaluated' },
+      ].map(b => `<span style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:9999px;background:${b.bg};margin-right:6px">
+        <span style="font-size:10px;font-weight:700;color:${b.text}">${b.label}</span>
+        <span style="font-size:10px;color:#6b7280">&mdash; ${b.desc}</span>
+      </span>`).join('')}
+    </div>
+  </div>
+
   <!-- Overview table -->
   <div>
-    <div style="font-size:11px;font-weight:700;color:#1a2d4a;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Policy Overview</div>
+    <div style="font-size:12px;font-weight:700;color:#1a2d4a;margin-bottom:9px;text-transform:uppercase;letter-spacing:0.5px">Policy Overview</div>
     <table>
       <thead>
         <tr style="-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#f3f4f6">
-          <th style="padding:7px 10px;text-align:left;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;border-bottom:2px solid #e5e7eb">Policy Name</th>
-          <th style="padding:7px 10px;text-align:left;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;border-bottom:2px solid #e5e7eb;white-space:nowrap">Status</th>
-          <th style="padding:7px 10px;text-align:left;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;border-bottom:2px solid #e5e7eb">Users</th>
-          <th style="padding:7px 10px;text-align:left;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;border-bottom:2px solid #e5e7eb">Grant Controls</th>
+          <th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;border-bottom:2px solid #e5e7eb">Policy Name</th>
+          <th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;border-bottom:2px solid #e5e7eb;white-space:nowrap">Status</th>
+          <th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;border-bottom:2px solid #e5e7eb">Users</th>
+          <th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;border-bottom:2px solid #e5e7eb">Grant Controls</th>
         </tr>
       </thead>
       <tbody>${overviewRows}</tbody>
     </table>
   </div>
 
-  <!-- Footer note -->
+  <!-- Footer -->
   <div style="margin-top:auto;padding:10px 14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px">
-    <p style="font-size:9px;color:#9ca3af">This report covers Conditional Access policies. Full policy details are on the following pages. &middot; Confidential &mdash; ${esc(orgName || 'Tenant')}</p>
+    <p style="font-size:10px;color:#9ca3af">This report covers Conditional Access policies only. Full policy details with all conditions and controls are on the following pages. &middot; Confidential &mdash; ${esc(orgName || 'Tenant')}</p>
   </div>
 </div>
 
 <!-- ═══ DETAIL PAGES ════════════════════════════════════════════════════════ -->
 <div class="break">
-  <div style="margin-bottom:18px;display:flex;align-items:baseline;justify-content:space-between">
+  <div style="margin-bottom:20px;display:flex;align-items:baseline;justify-content:space-between">
     <div>
-      <div style="font-size:15px;font-weight:700;color:#1a2d4a">Conditional Access — Policy Details</div>
-      <div style="font-size:10px;color:#9ca3af;margin-top:2px">${policies.length} policies &mdash; ${esc(orgName || 'Tenant')} &mdash; ${esc(date)}</div>
+      <div style="font-size:16px;font-weight:700;color:#1a2d4a">Conditional Access — Full Policy Details</div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:3px">${policies.length} ${policies.length === 1 ? 'policy' : 'policies'} &mdash; ${esc(orgName || 'Tenant')} &mdash; ${esc(date)}</div>
     </div>
+  </div>
+
+  <div style="border:1px solid #e5e7eb;border-radius:8px;padding:14px 18px;background:#f9fafb;margin-bottom:22px">
+    <p style="font-size:12px;color:#374151;line-height:1.6">Each policy below shows the full configuration retrieved directly from Microsoft Entra ID. <strong>Scope &amp; Conditions</strong> describes who and what the policy targets. <strong>Access Controls</strong> describes the action taken when those conditions are met — such as requiring MFA or blocking access. Policies with no conditions listed apply to all users and all applications by default.</p>
   </div>
 
   ${section('Enabled', enabled, '#22c55e')}
   ${section('Report Only', reportOnly, '#f59e0b')}
   ${section('Disabled', disabled, '#d1d5db')}
 
-  <div style="margin-top:16px;padding:10px 14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px">
-    <p style="font-size:9px;color:#9ca3af">Generated by M365 Security Policy Manager &middot; Affinity Technology &middot; ${esc(date)} &middot; Confidential</p>
+  <div style="margin-top:18px;padding:10px 14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px">
+    <p style="font-size:10px;color:#9ca3af">Generated by M365 Security Policy Manager &middot; Affinity Technology &middot; ${esc(date)} &middot; Confidential</p>
   </div>
 </div>
 
