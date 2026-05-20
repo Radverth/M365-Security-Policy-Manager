@@ -428,7 +428,7 @@ function AffinityReportHeader({ orgName, date }) {
 
 // ── Report view ───────────────────────────────────────────────────────────────
 
-function ReportView({ orgName, tenantPolicies, date }) {
+function ReportView({ orgName, tenantPolicies, nameMap = {}, date }) {
   const [saving, setSaving] = useState(false)
   const [savedPath, setSavedPath] = useState(null)
   const enabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabled').length
@@ -439,7 +439,7 @@ function ReportView({ orgName, tenantPolicies, date }) {
     setSaving(true)
     setSavedPath(null)
     try {
-      const result = await window.api.report.savePDF(orgName, tenantPolicies)
+      const result = await window.api.report.savePDF(orgName, tenantPolicies, nameMap)
       if (result?.path) {
         setSavedPath(result.path)
         setTimeout(() => setSavedPath(null), 6000)
@@ -581,6 +581,7 @@ export default function SecurityReport() {
       } else {
         setReport({
           policies: result.policies,
+          nameMap: result.nameMap || {},
           orgName: orgName || tenantSession?.Account || '',
           date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }),
         })
@@ -680,6 +681,7 @@ export default function SecurityReport() {
           <ReportView
             orgName={report.orgName}
             tenantPolicies={report.policies}
+            nameMap={report.nameMap}
             date={report.date}
           />
         ) : (

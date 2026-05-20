@@ -12,7 +12,7 @@ const psSession = require('./psSession')
 
 
 
-function generateReportHtml(orgName, policies, date) {
+function generateReportHtml(orgName, policies, date, nameMap = {}) {
   function esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
   function pick(...keys) { return obj => { for (const k of keys) { if (obj?.[k] != null) return obj[k] } return null } }
   const pv = (obj, ...keys) => { for (const k of keys) { if (obj?.[k] != null) return obj[k] } return null }
@@ -49,6 +49,30 @@ function generateReportHtml(orgName, policies, date) {
     const excParts = [...(excU.length ? [`${excU.length} user(s)`] : []), ...(excG.length ? [`${excG.length} group(s)`] : []), ...(excR.length ? [`${excR.length} role(s)`] : [])]
     if (!parts.length) return 'None configured'
     return parts.join(', ') + (excParts.length ? ` — excluding ${excParts.join(', ')}` : '')
+  }
+
+  function fmtExclusions(u) {
+    if (!u) return null
+    const excU = pv(u, 'ExcludeUsers', 'excludeUsers') || []
+    const excG = pv(u, 'ExcludeGroups', 'excludeGroups') || []
+    const excR = pv(u, 'ExcludeRoles', 'excludeRoles') || []
+    const items = []
+    for (const id of excU) {
+      const label = id === 'GuestsOrExternalUsers' ? 'Guests &amp; External Users'
+        : id === 'None' ? null
+        : nameMap[id] ? esc(nameMap[id])
+        : `<span style="font-family:'Courier New',monospace;font-size:11px">${esc(id)}</span>`
+      if (label) items.push({ icon: '👤', label, type: 'user' })
+    }
+    for (const id of excG) {
+      const label = nameMap[id] ? esc(nameMap[id]) : `<span style="font-family:'Courier New',monospace;font-size:11px">${esc(id)}</span>`
+      items.push({ icon: '👥', label, type: 'group' })
+    }
+    for (const id of excR) {
+      const label = nameMap[id] ? esc(nameMap[id]) : `<span style="font-family:'Courier New',monospace;font-size:11px">${esc(id)}</span>`
+      items.push({ icon: '🔑', label, type: 'role' })
+    }
+    return items.length ? items : null
   }
 
   function fmtApps(a) {
@@ -146,11 +170,24 @@ function generateReportHtml(orgName, policies, date) {
     const session    = fmtSession(pv(p, 'SessionControls', 'sessionControls'))
     const created    = fmtDate(pv(p, 'CreatedDateTime', 'createdDateTime'))
     const modified   = fmtDate(pv(p, 'ModifiedDateTime', 'modifiedDateTime'))
+    const exclusions = fmtExclusions(pv(cond, 'Users', 'users'))
 
     const hasConditions = users || apps || platforms || locations || clientApps || signRisk || userRisk
     const hasControls   = grant || session
 
     const subHdr = `font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.8px;color:#1a2d4a;margin-bottom:7px;padding-bottom:5px;border-bottom:1px solid #f3f4f6`
+
+    const typeLabels = { user: 'User', group: 'Group', role: 'Role' }
+    const exclusionsHtml = exclusions ? `
+      <div style="padding:10px 18px 14px;border-top:1px solid #f3f4f6">
+        <div style="${subHdr};margin-bottom:10px">Excluded Users &amp; Groups</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${exclusions.map(item => `<span style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;background:#fef2f2;border:1px solid #fecaca">
+            <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:#dc2626;flex-shrink:0">${typeLabels[item.type]}</span>
+            <span style="font-size:12px;color:#111827">${item.label}</span>
+          </span>`).join('')}
+        </div>
+      </div>` : ''
 
     return `<div style="margin-bottom:16px;page-break-inside:avoid;border:1px solid #e5e7eb;border-left:5px solid ${colors.border};border-radius:8px;background:#fff;overflow:hidden">
       <div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;padding:13px 18px;display:flex;align-items:flex-start;justify-content:space-between;gap:14px;border-bottom:1px solid #f3f4f6">
@@ -187,6 +224,7 @@ function generateReportHtml(orgName, policies, date) {
           </table>
         </div>
       </div>
+      ${exclusionsHtml}
     </div>`
   }
 
@@ -640,21 +678,55 @@ try {
       )
       const startIdx = lines.indexOf('POLICY_JSON_START')
       const endIdx = lines.indexOf('POLICY_JSON_END')
-      if (startIdx !== -1 && endIdx > startIdx) {
-        const json = lines.slice(startIdx + 1, endIdx).join('')
-        const parsed = JSON.parse(json)
-        return { policies: Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []) }
+      if (startIdx === -1 || endIdx <= startIdx) {
+        const errLine = lines.find(l => l.startsWith('ERROR:'))
+        if (errLine) return { error: errLine.slice(6).trim() }
+        return { error: 'No data returned' }
       }
-      const errLine = lines.find(l => l.startsWith('ERROR:'))
-      if (errLine) return { error: errLine.slice(6).trim() }
-      return { error: 'No data returned' }
+      const json = lines.slice(startIdx + 1, endIdx).join('')
+      const parsed = JSON.parse(json)
+      const policies = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : [])
+
+      // Resolve display names for all excluded users, groups, and roles
+      const SPECIAL_IDS = new Set(['All', 'None', 'GuestsOrExternalUsers', 'AllTrusted'])
+      const excUserIds  = [...new Set(policies.flatMap(p => (p?.Conditions?.Users?.ExcludeUsers || p?.conditions?.users?.excludeUsers || []).filter(id => !SPECIAL_IDS.has(id))))]
+      const excGroupIds = [...new Set(policies.flatMap(p => (p?.Conditions?.Users?.ExcludeGroups || p?.conditions?.users?.excludeGroups || [])))]
+      const excRoleIds  = [...new Set(policies.flatMap(p => (p?.Conditions?.Users?.ExcludeRoles  || p?.conditions?.users?.excludeRoles  || [])))]
+
+      let nameMap = {}
+      if (excUserIds.length || excGroupIds.length || excRoleIds.length) {
+        try {
+          const userIdsSafe  = excUserIds.map(id => id.replace(/'/g, "''")),
+                groupIdsSafe = excGroupIds.map(id => id.replace(/'/g, "''")),
+                roleIdsSafe  = excRoleIds.map(id => id.replace(/'/g, "''"))
+          const nameLines = []
+          await psSession.run(
+            `$nameMap = @{}
+${userIdsSafe.map(id => `try { $u = Get-MgUser -UserId '${id}' -Select DisplayName,UserPrincipalName -ErrorAction SilentlyContinue; if ($u) { $nameMap['${id}'] = if ($u.UserPrincipalName) { "$($u.DisplayName) ($($u.UserPrincipalName))" } else { $u.DisplayName } } } catch {}`).join('\n')}
+${groupIdsSafe.map(id => `try { $g = Get-MgGroup -GroupId '${id}' -Select DisplayName -ErrorAction SilentlyContinue; if ($g) { $nameMap['${id}'] = $g.DisplayName } } catch {}`).join('\n')}
+${roleIdsSafe.map(id => `try { $r = Get-MgDirectoryRoleTemplate -DirectoryRoleTemplateId '${id}' -Select DisplayName -ErrorAction SilentlyContinue; if ($r) { $nameMap['${id}'] = $r.DisplayName } } catch {}`).join('\n')}
+Write-Output "NAME_MAP_START"
+$nameMap | ConvertTo-Json -Compress
+Write-Output "NAME_MAP_END"`,
+            (line) => nameLines.push(line),
+            60000
+          )
+          const nmStart = nameLines.indexOf('NAME_MAP_START')
+          const nmEnd   = nameLines.indexOf('NAME_MAP_END')
+          if (nmStart !== -1 && nmEnd > nmStart) {
+            nameMap = JSON.parse(nameLines.slice(nmStart + 1, nmEnd).join('')) || {}
+          }
+        } catch { /* name resolution is best-effort */ }
+      }
+
+      return { policies, nameMap }
     } catch (err) {
       return { error: err.message }
     }
   })
 
   // App: save PDF
-  ipcMain.handle('app:savePDF', async (_, orgName, policiesData) => {
+  ipcMain.handle('app:savePDF', async (_, orgName, policiesData, nameMap = {}) => {
     const sanitised = (orgName || 'report')
       .replace(/[^a-zA-Z0-9\s\-_]/g, '')
       .replace(/\s+/g, '_')
@@ -671,7 +743,7 @@ try {
 
     const policies = Array.isArray(policiesData) ? policiesData : []
     const date = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })
-    const html = generateReportHtml(orgName, policies, date)
+    const html = generateReportHtml(orgName, policies, date, nameMap || {})
     const tmpPath = path.join(app.getPath('temp'), `_affinity_report_${Date.now()}.html`)
     const printWin = new BrowserWindow({
       show: false,
