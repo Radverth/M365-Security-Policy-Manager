@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import useStore from '../store'
 import Button from '../components/Button'
+import { BASELINES } from '../data/baselines.js'
+import { POLICIES } from '../../shared/constants.js'
 
 // ── Data helpers ──────────────────────────────────────────────────────────────
 
@@ -123,6 +125,103 @@ function formatSessionControls(sc) {
   const aer = pick(sc, 'ApplicationEnforcedRestrictions', 'applicationEnforcedRestrictions')
   if (aer?.IsEnabled || aer?.isEnabled) parts.push('App enforced restrictions')
   return parts
+}
+
+// ── Baseline recommendations ──────────────────────────────────────────────────
+
+const _norm = s => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+const _POLICY_MAP = Object.fromEntries(POLICIES.map(p => [p.id, p]))
+
+function computeRecommendations(tenantPolicies) {
+  return BASELINES.map(baseline => {
+    const items = baseline.policyIds.map(id => {
+      const policy = _POLICY_MAP[id]
+      if (!policy) return null
+      if (id.startsWith('IP')) return { id, name: policy.name, severity: policy.severity, status: 'unverifiable' }
+      const target = _norm(policy.name)
+      const found = tenantPolicies.some(p => _norm(pick(p, 'DisplayName', 'displayName') || '').includes(target))
+      return { id, name: policy.name, severity: policy.severity, status: found ? 'present' : 'missing' }
+    }).filter(Boolean)
+    const caItems = items.filter(i => i.status !== 'unverifiable')
+    const presentCount = caItems.filter(i => i.status === 'present').length
+    return {
+      ...baseline,
+      items,
+      presentCount,
+      totalCaCount: caItems.length,
+      missingItems: items.filter(i => i.status === 'missing'),
+      unverifiableCount: items.filter(i => i.status === 'unverifiable').length,
+    }
+  })
+}
+
+const SEV_STYLE = {
+  critical: { background: '#fef2f2', color: '#dc2626' },
+  high:     { background: '#fff7ed', color: '#ea580c' },
+  medium:   { background: '#fffbeb', color: '#ca8a04' },
+  low:      { background: '#f0fdf4', color: '#16a34a' },
+  info:     { background: '#f0f9ff', color: '#0369a1' },
+}
+
+function BaselineRecommendationCard({ baseline }) {
+  const { name, missingItems, presentCount, totalCaCount, unverifiableCount } = baseline
+  const pct = totalCaCount > 0 ? Math.round((presentCount / totalCaCount) * 100) : 100
+  const pctColor = pct === 100 ? '#16a34a' : pct >= 70 ? '#d97706' : '#dc2626'
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="flex items-start justify-between gap-4 mb-3">
+        <p className="text-sm font-semibold text-gray-900">{name}</p>
+        <div className="flex-shrink-0 text-right">
+          <p className="text-xl font-bold leading-none" style={{ color: pctColor }}>{pct}%</p>
+          <p className="text-xs text-gray-400 mt-0.5">{presentCount}/{totalCaCount} found</p>
+        </div>
+      </div>
+
+      {missingItems.length === 0 ? (
+        <p className="text-xs text-green-700 flex items-center gap-1.5">
+          <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+          All baseline CA policies detected
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          <p className="text-xs font-semibold text-gray-500 mb-2">Recommended additions:</p>
+          {missingItems.map(item => (
+            <div key={item.id} className="flex items-center gap-2">
+              <span className="text-xs font-mono text-gray-400 w-12 flex-shrink-0">{item.id}</span>
+              <span className="text-xs text-gray-700 flex-1 min-w-0">{item.name}</span>
+              <span className="text-xs font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                style={SEV_STYLE[item.severity] || SEV_STYLE.info}>{item.severity}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {unverifiableCount > 0 && (
+        <p className="text-xs text-gray-400 mt-2 pt-2 border-t border-gray-100">
+          + {unverifiableCount} Identity Protection {unverifiableCount === 1 ? 'policy' : 'policies'} — requires separate Entra ID review
+        </p>
+      )}
+    </div>
+  )
+}
+
+function RecommendationsSection({ recommendations }) {
+  return (
+    <div className="mt-6">
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Baseline Coverage</p>
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 mb-4">
+        <p className="text-xs text-amber-800">
+          <span className="font-semibold">Note:</span> Matching uses display name similarity — policies deployed with custom prefixes or names may not be detected. Identity Protection policies (IP*) are not included in the CA audit and require a separate Entra ID review.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {recommendations.map(r => <BaselineRecommendationCard key={r.id} baseline={r} />)}
+      </div>
+    </div>
+  )
 }
 
 // ── Progress UI for report generation ────────────────────────────────────────
@@ -434,12 +533,13 @@ function ReportView({ orgName, tenantPolicies, nameMap = {}, date }) {
   const enabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabled').length
   const reportOnly = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabledForReportingButNotEnforced').length
   const disabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'disabled').length
+  const recommendations = useMemo(() => computeRecommendations(tenantPolicies), [tenantPolicies])
 
   async function handleExportPDF() {
     setSaving(true)
     setSavedPath(null)
     try {
-      const result = await window.api.report.savePDF(orgName, tenantPolicies, nameMap)
+      const result = await window.api.report.savePDF(orgName, tenantPolicies, nameMap, recommendations)
       if (result?.path) {
         setSavedPath(result.path)
         setTimeout(() => setSavedPath(null), 6000)
@@ -528,6 +628,8 @@ function ReportView({ orgName, tenantPolicies, nameMap = {}, date }) {
             This report covers Conditional Access policies only. GUIDs are shown where display names are unavailable.
           </p>
         </div>
+
+        <RecommendationsSection recommendations={recommendations} />
       </div>
     </div>
   )
