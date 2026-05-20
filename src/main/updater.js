@@ -1,6 +1,6 @@
 const axios = require('axios')
 
-const GITHUB_REPO = 'tomaustin94/m365-security-policy-manager'
+const GITHUB_REPO = 'radverth/m365-security-policy-manager'
 
 function compareVersions(a, b) {
   const pa = a.replace(/^v/, '').split('.').map(Number)
