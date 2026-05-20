@@ -153,10 +153,12 @@ const useStore = create((set, get) => ({
   openConnectModal: () => set({ connectModalOpen: true }),
   closeConnectModal: () => set({ connectModalOpen: false }),
 
+  sessionCheckDone: false,
   checkExistingSession: async () => {
-    if (!window.api?.session) return
+    if (!window.api?.session) { set({ sessionCheckDone: true }); return }
     const ctx = await window.api.session.getContext()
     if (ctx) set({ tenantSession: ctx })
+    set({ sessionCheckDone: true })
   },
 
   // ── First Run ─────────────────────────────────────────────────────────────

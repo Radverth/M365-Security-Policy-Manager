@@ -620,11 +620,14 @@ function StepDeploy({ logs, results, selectedIds, running }) {
   )
 }
 
+// When a global tenant session is active, we skip step 1 (auth) entirely.
+// Steps with session: Configure Prefix, Select Policies, Configure Policies, Review, Deploy
+const STEPS_SESSION = ['Configure Prefix', 'Select Policies', 'Configure Policies', 'Review', 'Deploy']
+
 // ── Main wizard ───────────────────────────────────────────────────────────────
 export default function CreatePolicies() {
-  const { settings, addNotification } = useStore()
+  const { settings, addNotification, tenantSession, openConnectModal } = useStore()
 
-  // Pick up baseline pre-selection if navigated from Baselines page
   const baselinePolicyIds = (() => {
     try {
       const raw = sessionStorage.getItem('baseline-policyIds')
@@ -638,15 +641,17 @@ export default function CreatePolicies() {
     return n
   })()
 
+  // When a session exists, skip the auth step
+  const usingSession = !!tenantSession
+  const steps = usingSession ? STEPS_SESSION : STEPS
+
   const [authMode, setAuthMode] = useState('itglue')
   const [step, setStep] = useState(1)
   const [org, setOrg] = useState(null)
   const [credentials, setCredentials] = useState(null)
   const [usePrefix, setUsePrefix] = useState(!!settings.defaultPolicyPrefix)
   const [prefix, setPrefix] = useState(settings.defaultPolicyPrefix || '')
-  const [selectedIds, setSelectedIds] = useState(
-    baselinePolicyIds ?? []
-  )
+  const [selectedIds, setSelectedIds] = useState(baselinePolicyIds ?? [])
   const [policyConfigs, setPolicyConfigs] = useState({})
   const [deployLogs, setDeployLogs] = useState([])
   const [deployResults, setDeployResults] = useState({})
@@ -655,9 +660,17 @@ export default function CreatePolicies() {
   const [useDeviceCode, setUseDeviceCode] = useState(false)
   const [deviceCodeInfo, setDeviceCodeInfo] = useState(null)
 
-  // Auto-set prefix from org name when it changes
+  // Pre-fill org from the active tenant session
   useEffect(() => {
-    if (org?.name && !settings.defaultPolicyPrefix) setPrefix(org.name)
+    if (tenantSession?.Account && !org) {
+      const domain = tenantSession.Account.split('@')[1]?.split('.')[0] || tenantSession.Account
+      setOrg({ id: 'session', name: domain, shortName: '' })
+      if (!settings.defaultPolicyPrefix) setPrefix(domain)
+    }
+  }, [tenantSession])
+
+  useEffect(() => {
+    if (org?.name && !settings.defaultPolicyPrefix && !usingSession) setPrefix(org.name)
   }, [org?.name])
 
   useEffect(() => {
@@ -673,17 +686,16 @@ export default function CreatePolicies() {
   }, [])
 
   const canNext = () => {
-    if (step === 1) {
+    if (!usingSession && step === 1) {
       if (!org?.name) return false
       if (authMode === 'interactive') return true
       if (authMode === 'itglue') return !!(credentials?.username && credentials?.password)
       return false
     }
-    if (step === 2) return true
-    if (step === 3) return selectedIds.length > 0
-    if (step === 4) return true  // configure step — always can proceed
-    if (step === 5) return true  // review step
-    return false
+    // With session, step 1 = Configure Prefix (always ok), step 2 = Select Policies
+    const selectStep = usingSession ? 2 : 3
+    if (step === selectStep) return selectedIds.length > 0
+    return true
   }
 
   const handleAuthModeChange = (mode) => {
@@ -703,11 +715,11 @@ export default function CreatePolicies() {
     try {
       const result = await window.api.policies.create({
         policies: selectedPolicies,
-        credentials,
+        credentials: usingSession ? { interactive: true } : credentials,
         prefix: usePrefix ? prefix : '',
-        authMode,
+        authMode: usingSession ? 'interactive' : authMode,
         policyConfigs,
-        useDeviceCode,
+        useDeviceCode: usingSession ? true : useDeviceCode,
       })
       setDeployResults(result.results || {})
       const successCount = Object.values(result.results || {}).filter((v) => v === 'success').length
@@ -720,38 +732,63 @@ export default function CreatePolicies() {
   }
 
   const reset = () => {
-    setStep(1); setOrg(null); setCredentials(null)
+    setStep(1)
+    if (!usingSession) { setOrg(null); setCredentials(null) }
     setPolicyConfigs({})
     setDeployLogs([]); setDeployResults({})
   }
+
+  // Map current step to the correct content (accounting for skipped auth step)
+  const stepOffset = usingSession ? 1 : 0
+  const contentStep = step + stepOffset  // 1-indexed into original STEPS
+
+  const deployStep = steps.length
+  const reviewStep = steps.length - 1
 
   return (
     <div className="p-8 max-w-4xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Create Security Policies</h1>
-        <p className="mt-1 text-sm text-gray-500">Deploy M365 security policies to a tenant in {STEPS.length} steps</p>
+        <p className="mt-1 text-sm text-gray-500">Deploy M365 security policies to a tenant in {steps.length} steps</p>
       </div>
 
+      {/* Connected tenant banner */}
+      {usingSession && (
+        <div className="mb-5 flex items-center gap-3 px-4 py-3 rounded-xl border border-emerald-200 bg-emerald-50">
+          <div className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0 animate-pulse" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-emerald-800">Connected to {tenantSession.Account}</p>
+            <p className="text-xs text-emerald-600 mt-0.5">Policies will be deployed to this tenant using your active session.</p>
+          </div>
+          <button onClick={openConnectModal} className="text-xs text-emerald-600 hover:text-emerald-800 font-medium flex-shrink-0 underline underline-offset-2">
+            Switch tenant
+          </button>
+        </div>
+      )}
+
+      {/* Auth mode selector — only when no global session */}
+      {!usingSession && <AuthModeBanner mode={authMode} onChange={handleAuthModeChange} locked={step > 1} />}
+
+      {/* Baseline pre-selection notice */}
       {baselineName && (
         <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-lg bg-purple-50 border border-purple-200 text-sm text-purple-800">
           <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
           </svg>
-          <span>Policies pre-selected from <strong>{baselineName}</strong> baseline — you can adjust in step 3.</span>
+          <span>Policies pre-selected from <strong>{baselineName}</strong> baseline — you can adjust in step {usingSession ? 2 : 3}.</span>
         </div>
       )}
-      <AuthModeBanner mode={authMode} onChange={handleAuthModeChange} locked={step > 1} />
 
       <div className="mb-6">
-        <ProgressStep steps={STEPS} currentStep={step} />
+        <ProgressStep steps={steps} currentStep={step} />
       </div>
 
       <Card>
         <Card.Header>
-          <h2 className="text-base font-semibold text-gray-900">Step {step}: {STEPS[step - 1]}</h2>
+          <h2 className="text-base font-semibold text-gray-900">Step {step}: {steps[step - 1]}</h2>
         </Card.Header>
         <Card.Body>
-          {step === 1 && (
+          {!usingSession && step === 1 && (
             <StepOrgAndCredentials
               authMode={authMode}
               org={org} setOrg={setOrg}
@@ -759,7 +796,7 @@ export default function CreatePolicies() {
               useDeviceCode={useDeviceCode} setUseDeviceCode={setUseDeviceCode}
             />
           )}
-          {step === 2 && (
+          {contentStep === 2 && (
             <StepConfigurePrefix
               usePrefix={usePrefix} setUsePrefix={setUsePrefix}
               prefix={prefix} setPrefix={setPrefix}
@@ -767,24 +804,25 @@ export default function CreatePolicies() {
               orgName={org?.name}
             />
           )}
-          {step === 3 && <StepSelectPolicies selected={selectedIds} setSelected={setSelectedIds} />}
-          {step === 4 && (
+          {contentStep === 3 && <StepSelectPolicies selected={selectedIds} setSelected={setSelectedIds} />}
+          {contentStep === 4 && (
             <ConfigurePolicies
               selectedIds={selectedIds}
               policyConfigs={policyConfigs}
               setPolicyConfigs={setPolicyConfigs}
             />
           )}
-          {step === 5 && (
+          {contentStep === 5 && (
             <StepReview
-              authMode={authMode} org={org}
-              credentials={credentials}
+              authMode={usingSession ? 'interactive' : authMode}
+              org={org}
+              credentials={usingSession ? { username: tenantSession.Account } : credentials}
               prefix={prefix} usePrefix={usePrefix}
               selectedIds={selectedIds}
               policyConfigs={policyConfigs}
             />
           )}
-          {step === 6 && (
+          {contentStep === 6 && (
             <StepDeploy logs={deployLogs} results={deployResults} selectedIds={selectedIds} running={running} />
           )}
         </Card.Body>
@@ -794,16 +832,16 @@ export default function CreatePolicies() {
               Back
             </Button>
             <div className="flex gap-2">
-              {step < 6 && (
+              {step < deployStep && (
                 <Button
                   variant="primary"
-                  onClick={() => step === 5 ? setConfirmOpen(true) : setStep((s) => s + 1)}
+                  onClick={() => step === reviewStep ? setConfirmOpen(true) : setStep((s) => s + 1)}
                   disabled={!canNext() || running}
                 >
-                  {step === 5 ? 'Deploy Policies' : 'Next'}
+                  {step === reviewStep ? 'Deploy Policies' : 'Next'}
                 </Button>
               )}
-              {step === 6 && !running && Object.keys(deployResults).length > 0 && (
+              {step === deployStep && !running && Object.keys(deployResults).length > 0 && (
                 <Button variant="secondary" onClick={reset}>Start New</Button>
               )}
             </div>
@@ -818,12 +856,12 @@ export default function CreatePolicies() {
         title="Confirm Policy Deployment"
         confirmLabel="Deploy Now"
         cancelLabel="Cancel"
-        onConfirm={() => { setStep(6); handleDeploy() }}
+        onConfirm={() => { setStep(deployStep); handleDeploy() }}
       >
         <div className="py-2 space-y-2">
           <p>You are about to create <strong>{selectedIds.length} policies</strong> in the <strong>{org?.name}</strong> tenant.</p>
-          {authMode === 'interactive' && (
-            <p className="text-blue-700">A browser sign-in window will open. Complete the authentication to begin deployment.</p>
+          {(usingSession || authMode === 'interactive') && (
+            <p className="text-blue-700">A device code prompt will appear in the log — sign in with your admin account to begin deployment.</p>
           )}
           <p className="text-amber-700">This will modify your Microsoft 365 Conditional Access and security configuration.</p>
         </div>

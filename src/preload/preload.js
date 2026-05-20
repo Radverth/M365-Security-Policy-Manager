@@ -27,21 +27,14 @@ contextBridge.exposeInMainWorld('api', {
     getPasswords: (orgId) => ipcRenderer.invoke('itglue:getPasswords', orgId),
   },
 
-  // Session
-  session: {
-    connect: (credentials, authMode) => ipcRenderer.invoke('session:connect', credentials, authMode),
-    disconnect: () => ipcRenderer.invoke('session:disconnect'),
-    getContext: () => ipcRenderer.invoke('session:getContext'),
-  },
-
   // Policies
   policies: {
-    list: () => ipcRenderer.invoke('policies:list'),
+    list: (credentials, authMode) => ipcRenderer.invoke('policies:list', credentials, authMode),
     disconnect: () => ipcRenderer.invoke('policies:disconnect'),
     create: (options) => ipcRenderer.invoke('policies:create', options),
-    update: (id, patch) => ipcRenderer.invoke('policies:update', id, patch),
-    delete: (id) => ipcRenderer.invoke('policies:delete', id),
-    toggleState: (id, state) => ipcRenderer.invoke('policies:toggleState', id, state),
+    update: (id, patch, tenantId) => ipcRenderer.invoke('policies:update', id, patch, tenantId),
+    delete: (id, tenantId) => ipcRenderer.invoke('policies:delete', id, tenantId),
+    toggleState: (id, state, tenantId) => ipcRenderer.invoke('policies:toggleState', id, state, tenantId),
   },
 
   // App
@@ -90,8 +83,8 @@ contextBridge.exposeInMainWorld('api', {
 
   // Report
   report: {
-    audit: () => ipcRenderer.invoke('report:audit'),
-    savePDF: (orgName, policies) => ipcRenderer.invoke('app:savePDF', orgName, policies),
+    audit: (options) => ipcRenderer.invoke('report:audit', options),
+    savePDF: (orgName) => ipcRenderer.invoke('app:savePDF', orgName),
   },
 
   // PS event listeners
@@ -104,12 +97,5 @@ contextBridge.exposeInMainWorld('api', {
     const handler = (_, data) => cb(data)
     ipcRenderer.on('ps:error', handler)
     return () => ipcRenderer.removeListener('ps:error', handler)
-  },
-
-  // Session disconnected listener
-  onSessionDisconnected: (cb) => {
-    const h = () => cb()
-    ipcRenderer.on('session:disconnected', h)
-    return () => ipcRenderer.removeListener('session:disconnected', h)
   },
 })

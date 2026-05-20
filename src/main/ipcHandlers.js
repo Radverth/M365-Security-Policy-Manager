@@ -320,17 +320,27 @@ function registerIpcHandlers(win) {
     if (!psSession.alive) return { error: 'No active session' }
     try {
       const lines = []
-      const output = await psSession.run(
-        `$policies = Get-MgIdentityConditionalAccessPolicy -All\nWrite-Output "POLICY_JSON_START"\n$policies | ConvertTo-Json -Depth 10\nWrite-Output "POLICY_JSON_END"`,
-        (line) => { lines.push(line); win.webContents.send('ps:output', line) }
+      await psSession.run(
+        `try {
+  $policies = Get-MgIdentityConditionalAccessPolicy -All
+  Write-Output "POLICY_JSON_START"
+  $policies | ConvertTo-Json -Depth 10 -Compress
+  Write-Output "POLICY_JSON_END"
+} catch {
+  Write-Output "ERROR: $($_.Exception.Message)"
+}`,
+        (line) => lines.push(line)
       )
-      let policies = []
-      const jsonBlock = output.match(/POLICY_JSON_START\r?\n([\s\S]*?)\r?\nPOLICY_JSON_END/)
-      if (jsonBlock) {
-        const parsed = JSON.parse(jsonBlock[1])
-        policies = Array.isArray(parsed) ? parsed : [parsed]
+      const startIdx = lines.indexOf('POLICY_JSON_START')
+      const endIdx = lines.indexOf('POLICY_JSON_END')
+      if (startIdx !== -1 && endIdx > startIdx) {
+        const json = lines.slice(startIdx + 1, endIdx).join('')
+        const parsed = JSON.parse(json)
+        return { policies: Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []), context: psSession.context }
       }
-      return { policies, context: psSession.context }
+      const errLine = lines.find(l => l.startsWith('ERROR:'))
+      if (errLine) return { error: errLine.slice(6).trim() }
+      return { policies: [], context: psSession.context }
     } catch (err) {
       return { error: err.message }
     }
@@ -431,19 +441,38 @@ try {
     if (!psSession.alive) return { error: 'No active session — connect a tenant first' }
     try {
       const lines = []
-      win.webContents.send('ps:output', 'CONNECTED: Reading Conditional Access policies...')
-      const output = await psSession.run(
-        `$policies = Get-MgIdentityConditionalAccessPolicy -All\n$count = @($policies).Count\nWrite-Output "POLICY_JSON_START"\n$policies | ConvertTo-Json -Depth 10\nWrite-Output "POLICY_JSON_END"\nWrite-Output "DONE: $count policies found"`,
-        (line) => { lines.push(line); win.webContents.send('ps:output', line) },
+      let inJsonBlock = false
+      await psSession.run(
+        `try {
+  $policies = Get-MgIdentityConditionalAccessPolicy -All
+  $count = @($policies).Count
+  Write-Output "STATUS: Fetched $count policies from tenant"
+  Write-Output "POLICY_JSON_START"
+  $policies | ConvertTo-Json -Depth 10 -Compress
+  Write-Output "POLICY_JSON_END"
+  Write-Output "DONE: $count"
+} catch {
+  Write-Output "ERROR: $($_.Exception.Message)"
+}`,
+        (line) => {
+          lines.push(line)
+          if (line === 'POLICY_JSON_START') { inJsonBlock = true; return }
+          if (line === 'POLICY_JSON_END') { inJsonBlock = false; return }
+          if (!inJsonBlock && line.trim()) {
+            win.webContents.send('ps:output', line)
+          }
+        },
         90000
       )
       const startIdx = lines.indexOf('POLICY_JSON_START')
       const endIdx = lines.indexOf('POLICY_JSON_END')
       if (startIdx !== -1 && endIdx > startIdx) {
-        const json = lines.slice(startIdx + 1, endIdx).join('\n')
+        const json = lines.slice(startIdx + 1, endIdx).join('')
         const parsed = JSON.parse(json)
-        return { policies: Array.isArray(parsed) ? parsed : [parsed] }
+        return { policies: Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []) }
       }
+      const errLine = lines.find(l => l.startsWith('ERROR:'))
+      if (errLine) return { error: errLine.slice(6).trim() }
       return { error: 'No data returned' }
     } catch (err) {
       return { error: err.message }

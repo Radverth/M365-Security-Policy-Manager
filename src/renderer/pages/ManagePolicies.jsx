@@ -6,7 +6,7 @@ import Badge from '../components/Badge'
 import Modal from '../components/Modal'
 import SlideOver from '../components/SlideOver'
 import SearchInput from '../components/SearchInput'
-import DeviceCodeModal, { parseDeviceCode } from '../components/DeviceCodeModal'
+import LogPanel from '../components/LogPanel'
 
 // Handle PascalCase (PS) and camelCase (Graph API) property names
 function pick(obj, ...keys) {
@@ -137,9 +137,143 @@ function PolicyEditor({ policy, onSave, onCancel, saving }) {
   )
 }
 
+// ── Auth mode selector ────────────────────────────────────────────────────────
+function AuthModeSelector({ mode, onChange }) {
+  const modes = [
+    { id: 'itglue',      label: 'IT Glue',       icon: '🔗', desc: 'Resolve org credentials from IT Glue' },
+    { id: 'interactive', label: 'WAM / Browser',  icon: '🌐', desc: 'Sign in interactively via browser or device code' },
+  ]
+  return (
+    <div className="grid grid-cols-2 gap-3 mb-4">
+      {modes.map((m) => (
+        <button
+          key={m.id}
+          onClick={() => onChange(m.id)}
+          className={[
+            'relative flex items-center gap-3 px-4 py-3 rounded-lg border-2 text-left transition-all',
+            mode === m.id ? 'border-navy bg-navy-50' : 'border-gray-200 hover:border-gray-300 bg-white',
+          ].join(' ')}
+        >
+          <span className="text-lg leading-none">{m.icon}</span>
+          <div>
+            <p className={`text-sm font-semibold ${mode === m.id ? 'text-navy' : 'text-gray-700'}`}>{m.label}</p>
+            <p className="text-xs text-gray-500">{m.desc}</p>
+          </div>
+          {mode === m.id && <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-navy" />}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── IT Glue connection form ───────────────────────────────────────────────────
+function ItGlueConnect({ credentials, setCredentials }) {
+  const { orgs, orgsLoading, loadOrgs, settings } = useStore()
+  const [selectedOrg, setSelectedOrg] = useState(null)
+  const [passwords, setPasswords] = useState([])
+  const [pwLoading, setPwLoading] = useState(false)
+  const [selectedPwId, setSelectedPwId] = useState(null)
+
+  useEffect(() => {
+    if (settings.itGlueApiKey) loadOrgs()
+  }, [])
+
+  useEffect(() => {
+    if (!selectedOrg || !window.api) return
+    setPwLoading(true)
+    setCredentials(null)
+    setSelectedPwId(null)
+    window.api.itglue.getPasswords(selectedOrg.id)
+      .then((res) => setPasswords(res || []))
+      .catch(() => setPasswords([]))
+      .finally(() => setPwLoading(false))
+  }, [selectedOrg?.id])
+
+  if (!settings.itGlueApiKey) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+        IT Glue API key not configured. Go to Settings to add your key, or use WAM / Browser mode.
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      {/* Org picker */}
+      <div>
+        <p className="text-xs font-medium text-gray-600 mb-1.5">Organisation</p>
+        <div className="max-h-40 overflow-y-auto space-y-1 border border-gray-200 rounded-lg p-1">
+          {orgsLoading ? (
+            Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-9 bg-gray-100 rounded animate-pulse" />)
+          ) : orgs.length === 0 ? (
+            <p className="text-xs text-gray-400 p-3 text-center">No organisations found</p>
+          ) : orgs.map((o) => (
+            <button
+              key={o.id}
+              onClick={() => setSelectedOrg(o)}
+              className={[
+                'w-full text-left px-3 py-2 rounded text-sm transition-colors',
+                selectedOrg?.id === o.id ? 'bg-navy text-white font-medium' : 'hover:bg-gray-50 text-gray-800',
+              ].join(' ')}
+            >
+              {o.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Password picker */}
+      <div>
+        <p className="text-xs font-medium text-gray-600 mb-1.5">Credential</p>
+        <div className="max-h-40 overflow-y-auto space-y-1 border border-gray-200 rounded-lg p-1">
+          {!selectedOrg ? (
+            <p className="text-xs text-gray-400 p-3 text-center">Select an organisation first</p>
+          ) : pwLoading ? (
+            Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-9 bg-gray-100 rounded animate-pulse" />)
+          ) : passwords.length === 0 ? (
+            <p className="text-xs text-gray-400 p-3 text-center">No passwords found</p>
+          ) : passwords.map((pw) => (
+            <button
+              key={pw.id}
+              onClick={() => { setSelectedPwId(pw.id); setCredentials({ username: pw.username, password: pw.password }) }}
+              className={[
+                'w-full text-left px-3 py-2 rounded text-sm transition-colors',
+                selectedPwId === pw.id ? 'bg-navy text-white font-medium' : 'hover:bg-gray-50 text-gray-800',
+              ].join(' ')}
+            >
+              <p className="font-medium truncate">{pw.name}</p>
+              <p className={`text-xs truncate ${credentials?.username === pw.username ? 'text-white/70' : 'text-gray-400'}`}>{pw.username}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── WAM connection form ───────────────────────────────────────────────────────
+function WamConnect() {
+  return (
+    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-2">
+      <div className="flex items-center gap-2">
+        <svg className="w-5 h-5 text-blue-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
+        </svg>
+        <p className="text-sm font-semibold text-blue-800">Interactive / WAM sign-in</p>
+      </div>
+      <p className="text-sm text-blue-700">
+        Clicking Load Policies will start a device code sign-in. A code and URL will appear in the connection output below — go to <strong>microsoft.com/devicelogin</strong> and enter the code to authenticate.
+      </p>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function ManagePolicies() {
-  const { addNotification, tenantSession, openConnectModal, clearTenantSession } = useStore()
+  const { addNotification } = useStore()
+  const [authMode, setAuthMode] = useState('itglue')
+  const [credentials, setCredentials] = useState(null)
+  const [connectedAs, setConnectedAs] = useState(null)
   const [policies, setPolicies] = useState([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
@@ -151,31 +285,36 @@ export default function ManagePolicies() {
   const [bulkLoading, setBulkLoading] = useState(false)
   const [editTarget, setEditTarget] = useState(null)
   const [saveLoading, setSaveLoading] = useState(false)
-  const [deviceCodeInfo, setDeviceCodeInfo] = useState(null)
+  const [authLogs, setAuthLogs] = useState([])
 
   useEffect(() => {
     if (!window.api) return
-    const unOut = window.api.onPsOutput((line) => {
-      const dc = parseDeviceCode(line)
-      if (dc) setDeviceCodeInfo(dc)
-      if (/connected\.|CONNECTED:|welcome to microsoft graph/i.test(line)) setDeviceCodeInfo(null)
-    })
-    const unDisc = window.api.onSessionDisconnected?.(() => {
-      clearTenantSession()
-      setPolicies([])
-      setSelectedRows(new Set())
-    })
-    return () => { unOut?.(); unDisc?.() }
+    const unOut = window.api.onPsOutput((line) => setAuthLogs((l) => [...l, { line, type: 'output' }]))
+    const unErr = window.api.onPsError((line) => setAuthLogs((l) => [...l, { line, type: 'error' }]))
+    return () => { unOut?.(); unErr?.() }
   }, [])
 
+  const handleAuthModeChange = (mode) => {
+    setAuthMode(mode)
+    setCredentials(null)
+    setConnectedAs(null)
+    setPolicies([])
+  }
+
+  const canLoad = authMode === 'interactive' || !!(credentials?.username && credentials?.password)
+
   const handleLoad = async () => {
-    if (!window.api || !tenantSession) return
+    if (!window.api || !canLoad) return
     setLoading(true)
+    setAuthLogs([])
+    setConnectedAs(null)
     try {
-      const result = await window.api.policies.list()
-      if (result.error) { addNotification(result.error, 'error'); return }
-      setPolicies(Array.isArray(result.policies) ? result.policies : [])
+      const creds = authMode === 'interactive' ? { interactive: true } : credentials
+      const result = await window.api.policies.list(creds, authMode)
+      const { policies: loadedPolicies = [], context = null } = result || {}
+      setPolicies(Array.isArray(loadedPolicies) ? loadedPolicies : [])
       setSelectedRows(new Set())
+      if (context) setConnectedAs(context)
     } catch (err) {
       addNotification('Failed to load policies: ' + err.message, 'error')
     } finally {
@@ -184,9 +323,10 @@ export default function ManagePolicies() {
   }
 
   const handleDisconnect = () => {
-    clearTenantSession()
+    setConnectedAs(null)
     setPolicies([])
     setSelectedRows(new Set())
+    setAuthLogs([])
     window.api?.policies?.disconnect?.().catch(() => {})
   }
 
@@ -213,7 +353,7 @@ export default function ManagePolicies() {
     if (!window.api || !deleteTarget) return
     setDeleteLoading(true)
     try {
-      await window.api.policies.delete(deleteTarget.Id)
+      await window.api.policies.delete(deleteTarget.Id, connectedAs?.TenantId)
       setPolicies((ps) => ps.filter((p) => p.Id !== deleteTarget.Id))
       addNotification('Policy deleted', 'success')
     } catch (err) {
@@ -228,7 +368,7 @@ export default function ManagePolicies() {
     if (!window.api) return
     const newState = policy.State === 'enabled' ? 'disabled' : 'enabled'
     try {
-      await window.api.policies.toggleState(policy.Id, newState)
+      await window.api.policies.toggleState(policy.Id, newState, connectedAs?.TenantId)
       setPolicies((ps) => ps.map((p) => p.Id === policy.Id ? { ...p, State: newState } : p))
       addNotification(`Policy ${newState}`, 'success')
     } catch (err) {
@@ -242,11 +382,11 @@ export default function ManagePolicies() {
     const ids = [...selectedRows]
     try {
       if (bulkAction === 'delete') {
-        await Promise.all(ids.map((id) => window.api.policies.delete(id)))
+        await Promise.all(ids.map((id) => window.api.policies.delete(id, connectedAs?.TenantId)))
         setPolicies((ps) => ps.filter((p) => !selectedRows.has(p.Id)))
         addNotification(`${ids.length} policies deleted`, 'success')
       } else {
-        await Promise.all(ids.map((id) => window.api.policies.toggleState(id, bulkAction)))
+        await Promise.all(ids.map((id) => window.api.policies.toggleState(id, bulkAction, connectedAs?.TenantId)))
         setPolicies((ps) => ps.map((p) => selectedRows.has(p.Id) ? { ...p, State: bulkAction } : p))
         addNotification(`${ids.length} policies ${bulkAction}`, 'success')
       }
@@ -265,7 +405,7 @@ export default function ManagePolicies() {
     if (!window.api || !editTarget) return
     setSaveLoading(true)
     try {
-      await window.api.policies.update(editTarget.Id, patch)
+      await window.api.policies.update(editTarget.Id, patch, connectedAs?.TenantId)
       setPolicies(ps => ps.map(p => p.Id === editTarget.Id ? { ...p, ...patch } : p))
       addNotification('Policy updated', 'success')
       setEditTarget(null)
@@ -289,30 +429,43 @@ export default function ManagePolicies() {
           <h2 className="text-sm font-semibold text-gray-900">Tenant Connection</h2>
         </Card.Header>
         <Card.Body className="space-y-4">
-          {tenantSession ? (
+          {connectedAs ? (
             <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
               <div className="flex items-center gap-3">
                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0" />
                 <div>
                   <p className="text-xs font-medium text-emerald-600 uppercase tracking-wide">Connected</p>
-                  <p className="text-sm font-semibold text-emerald-900">{tenantSession.Account}</p>
+                  <p className="text-sm font-semibold text-emerald-900">{connectedAs.Account}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Button size="sm" variant="primary" onClick={handleLoad} loading={loading}>
-                  {policies.length > 0 ? 'Refresh' : 'Load Policies'}
-                </Button>
-                <Button size="sm" variant="secondary" onClick={openConnectModal}>Switch Account</Button>
-              </div>
+              <Button size="sm" variant="secondary" onClick={handleDisconnect}>Switch Account</Button>
             </div>
           ) : (
-            <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-              <div className="flex items-center gap-3">
-                <div className="w-2.5 h-2.5 rounded-full bg-gray-300 flex-shrink-0" />
-                <p className="text-sm text-gray-500">No tenant connected</p>
+            <>
+              <AuthModeSelector mode={authMode} onChange={handleAuthModeChange} />
+              {authMode === 'itglue'
+                ? <ItGlueConnect credentials={credentials} setCredentials={setCredentials} />
+                : <WamConnect />
+              }
+              <div className="flex justify-end">
+                <Button variant="primary" onClick={handleLoad} loading={loading} disabled={!canLoad}>
+                  Load Policies
+                </Button>
               </div>
-              <Button size="sm" variant="primary" onClick={openConnectModal}>Connect Tenant</Button>
+            </>
+          )}
+          {loading && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              <p className="font-medium mb-1">Authenticating…</p>
+              <p className="text-xs text-blue-600">
+                {authMode === 'interactive'
+                  ? 'A browser sign-in window should open. If you see a device code below, go to microsoft.com/devicelogin and enter it.'
+                  : 'A browser window will open pre-filled with the selected account. Complete sign-in to continue.'}
+              </p>
             </div>
+          )}
+          {authLogs.length > 0 && (
+            <LogPanel logs={authLogs} height="h-28" title="Connection Output" />
           )}
         </Card.Body>
       </Card>
@@ -368,9 +521,7 @@ export default function ManagePolicies() {
             <svg className="w-12 h-12 mb-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
             </svg>
-            <p className="text-sm">
-              {tenantSession ? 'Click "Load Policies" above to fetch policies.' : 'Connect to a tenant above to view its policies.'}
-            </p>
+            <p className="text-sm">Connect to a tenant above to view its policies.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -419,50 +570,28 @@ export default function ManagePolicies() {
                       <td className="px-4 py-3">{stateBadge(policy.State)}</td>
                       <td className="px-4 py-3 text-xs text-gray-500">{formatDate(policy.CreatedDateTime)}</td>
                       <td className="px-4 py-3 text-xs text-gray-500">{formatDate(policy.ModifiedDateTime)}</td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex justify-end items-center gap-1">
+                      <td className="px-6 py-3 text-right">
+                        <div className="flex justify-end gap-1">
                           {managed ? (
-                            <button
-                              onClick={() => handleEdit(policy)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors"
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                              </svg>
-                              Edit
-                            </button>
+                            <Button size="sm" variant="ghost" onClick={() => handleEdit(policy)}>Edit</Button>
                           ) : (
-                            <button
+                            <Button
+                              size="sm"
+                              variant="ghost"
                               onClick={() => {
                                 const url = `https://entra.microsoft.com/#view/Microsoft_AAD_ConditionalAccess/PolicyBlade/policyId/${policy.Id}`
                                 window.api?.app?.openExternal(url)
                               }}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors"
-                              title="Open in Entra portal"
                             >
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                              </svg>
-                              Entra
-                            </button>
+                              Open in Entra ↗
+                            </Button>
                           )}
-                          <button
-                            onClick={() => handleToggle(policy)}
-                            className={[
-                              'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors',
-                              policy.State === 'enabled'
-                                ? 'text-amber-600 hover:bg-amber-50'
-                                : 'text-emerald-600 hover:bg-emerald-50',
-                            ].join(' ')}
-                          >
+                          <Button size="sm" variant="ghost" onClick={() => handleToggle(policy)}>
                             {policy.State === 'enabled' ? 'Disable' : 'Enable'}
-                          </button>
-                          <button
-                            onClick={() => setDeleteTarget(policy)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-red-500 hover:bg-red-50 transition-colors"
-                          >
-                            Delete
-                          </button>
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(policy)}>
+                            <span className="text-red-600">Delete</span>
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -497,8 +626,6 @@ export default function ManagePolicies() {
           saving={saveLoading}
         />
       </SlideOver>
-
-      <DeviceCodeModal info={deviceCodeInfo} onDismiss={() => setDeviceCodeInfo(null)} />
     </div>
   )
 }
