@@ -693,7 +693,7 @@ try {
         const orgLines = []
         await psSession.run(
           `try {
-  $org = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization?`$select=displayName" -ErrorAction SilentlyContinue
+  $org = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization?\`$select=displayName" -ErrorAction SilentlyContinue
   if ($org -and $org.value -and $org.value.Count -gt 0) { Write-Output "TENANT_NAME:$($org.value[0].displayName)" }
 } catch {}`,
           (line) => orgLines.push(line),
@@ -715,7 +715,7 @@ try {
           const userBlocks = excUserIds.map(id => {
             const safe = id.replace(/'/g, "''")
             return `try {
-  $r = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/users/${safe}?`$select=displayName,userPrincipalName" -ErrorAction SilentlyContinue
+  $r = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/users/${safe}?\`$select=displayName,userPrincipalName" -ErrorAction SilentlyContinue
   if ($r -and $r.displayName) {
     $nameMap['${safe}'] = if ($r.userPrincipalName) { "$($r.displayName) ($($r.userPrincipalName))" } else { $r.displayName }
   }
@@ -724,7 +724,7 @@ try {
           const groupBlocks = excGroupIds.map(id => {
             const safe = id.replace(/'/g, "''")
             return `try {
-  $r = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/groups/${safe}?`$select=displayName" -ErrorAction SilentlyContinue
+  $r = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/groups/${safe}?\`$select=displayName" -ErrorAction SilentlyContinue
   if ($r -and $r.displayName) { $nameMap['${safe}'] = $r.displayName }
 } catch {}`
           })
