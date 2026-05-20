@@ -699,17 +699,17 @@ try {
           const userBlocks = excUserIds.map(id => {
             const safe = id.replace(/'/g, "''")
             return `try {
-  $u = Get-MgUser -UserId '${safe}' -Property DisplayName,UserPrincipalName -ErrorAction SilentlyContinue
-  if ($u) {
-    $nameMap['${safe}'] = if ($u.UserPrincipalName) { "$($u.DisplayName) ($($u.UserPrincipalName))" } else { $u.DisplayName }
+  $r = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/users/${safe}?`$select=displayName,userPrincipalName" -ErrorAction SilentlyContinue
+  if ($r -and $r.displayName) {
+    $nameMap['${safe}'] = if ($r.userPrincipalName) { "$($r.displayName) ($($r.userPrincipalName))" } else { $r.displayName }
   }
 } catch {}`
           })
           const groupBlocks = excGroupIds.map(id => {
             const safe = id.replace(/'/g, "''")
             return `try {
-  $g = Get-MgGroup -GroupId '${safe}' -Property DisplayName -ErrorAction SilentlyContinue
-  if ($g) { $nameMap['${safe}'] = $g.DisplayName }
+  $r = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/groups/${safe}?`$select=displayName" -ErrorAction SilentlyContinue
+  if ($r -and $r.displayName) { $nameMap['${safe}'] = $r.displayName }
 } catch {}`
           })
           const roleBlocks = excRoleIds.map(id => {
