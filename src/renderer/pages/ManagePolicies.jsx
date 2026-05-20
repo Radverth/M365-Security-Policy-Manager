@@ -129,7 +129,7 @@ function PolicyEditor({ policy, onSave, onCancel, saving }) {
 
       <div className="flex justify-end gap-2 pt-1">
         <Button variant="secondary" onClick={onCancel}>Cancel</Button>
-        <Button variant="primary" onClick={() => onSave({ DisplayName: name, State: state })} loading={saving}>
+        <Button variant="primary" onClick={() => onSave({ displayName: name, state })} loading={saving}>
           Save Changes
         </Button>
       </div>
@@ -270,7 +270,7 @@ function WamConnect() {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function ManagePolicies() {
-  const { addNotification } = useStore()
+  const { addNotification, tenantSession, openConnectModal } = useStore()
   const [authMode, setAuthMode] = useState('itglue')
   const [credentials, setCredentials] = useState(null)
   const [connectedAs, setConnectedAs] = useState(null)
@@ -287,6 +287,9 @@ export default function ManagePolicies() {
   const [saveLoading, setSaveLoading] = useState(false)
   const [authLogs, setAuthLogs] = useState([])
 
+  // Effective connection: prefer local connectedAs, fall back to global session
+  const effectiveSession = connectedAs || tenantSession
+
   useEffect(() => {
     if (!window.api) return
     const unOut = window.api.onPsOutput((line) => setAuthLogs((l) => [...l, { line, type: 'output' }]))
@@ -301,16 +304,18 @@ export default function ManagePolicies() {
     setPolicies([])
   }
 
-  const canLoad = authMode === 'interactive' || !!(credentials?.username && credentials?.password)
+  const canLoad = !!tenantSession || authMode === 'interactive' || !!(credentials?.username && credentials?.password)
 
   const handleLoad = async () => {
-    if (!window.api || !canLoad) return
+    if (!window.api) return
     setLoading(true)
     setAuthLogs([])
-    setConnectedAs(null)
     try {
-      const creds = authMode === 'interactive' ? { interactive: true } : credentials
-      const result = await window.api.policies.list(creds, authMode)
+      const result = await window.api.policies.list()
+      if (result?.error) {
+        addNotification('Failed to load policies: ' + result.error, 'error')
+        return
+      }
       const { policies: loadedPolicies = [], context = null } = result || {}
       setPolicies(Array.isArray(loadedPolicies) ? loadedPolicies : [])
       setSelectedRows(new Set())
@@ -322,12 +327,18 @@ export default function ManagePolicies() {
     }
   }
 
+  // Auto-load policies when the global tenant session is available
+  useEffect(() => {
+    if (tenantSession && !connectedAs && policies.length === 0 && !loading) {
+      handleLoad()
+    }
+  }, [tenantSession])  // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleDisconnect = () => {
     setConnectedAs(null)
     setPolicies([])
     setSelectedRows(new Set())
     setAuthLogs([])
-    window.api?.policies?.disconnect?.().catch(() => {})
   }
 
   const filtered = policies.filter((p) => {
@@ -405,8 +416,16 @@ export default function ManagePolicies() {
     if (!window.api || !editTarget) return
     setSaveLoading(true)
     try {
-      await window.api.policies.update(editTarget.Id, patch, connectedAs?.TenantId)
-      setPolicies(ps => ps.map(p => p.Id === editTarget.Id ? { ...p, ...patch } : p))
+      await window.api.policies.update(editTarget.Id, patch)
+      // Update local state — policies use PascalCase from PowerShell
+      setPolicies(ps => ps.map(p => p.Id === editTarget.Id
+        ? {
+            ...p,
+            ...(patch.displayName !== undefined && { DisplayName: patch.displayName }),
+            ...(patch.state !== undefined && { State: patch.state }),
+          }
+        : p
+      ))
       addNotification('Policy updated', 'success')
       setEditTarget(null)
     } catch (err) {
@@ -429,16 +448,18 @@ export default function ManagePolicies() {
           <h2 className="text-sm font-semibold text-gray-900">Tenant Connection</h2>
         </Card.Header>
         <Card.Body className="space-y-4">
-          {connectedAs ? (
+          {effectiveSession ? (
             <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
               <div className="flex items-center gap-3">
-                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0 animate-pulse" />
                 <div>
                   <p className="text-xs font-medium text-emerald-600 uppercase tracking-wide">Connected</p>
-                  <p className="text-sm font-semibold text-emerald-900">{connectedAs.Account}</p>
+                  <p className="text-sm font-semibold text-emerald-900">{effectiveSession.Account}</p>
                 </div>
               </div>
-              <Button size="sm" variant="secondary" onClick={handleDisconnect}>Switch Account</Button>
+              <Button size="sm" variant="secondary" onClick={tenantSession ? openConnectModal : handleDisconnect}>
+                Switch Tenant
+              </Button>
             </div>
           ) : (
             <>
@@ -447,7 +468,8 @@ export default function ManagePolicies() {
                 ? <ItGlueConnect credentials={credentials} setCredentials={setCredentials} />
                 : <WamConnect />
               }
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={openConnectModal}>Use global session</Button>
                 <Button variant="primary" onClick={handleLoad} loading={loading} disabled={!canLoad}>
                   Load Policies
                 </Button>
@@ -456,12 +478,7 @@ export default function ManagePolicies() {
           )}
           {loading && (
             <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-              <p className="font-medium mb-1">Authenticating…</p>
-              <p className="text-xs text-blue-600">
-                {authMode === 'interactive'
-                  ? 'A browser sign-in window should open. If you see a device code below, go to microsoft.com/devicelogin and enter it.'
-                  : 'A browser window will open pre-filled with the selected account. Complete sign-in to continue.'}
-              </p>
+              <p className="font-medium mb-1">Loading policies…</p>
             </div>
           )}
           {authLogs.length > 0 && (

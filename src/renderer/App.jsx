@@ -600,7 +600,7 @@ function ConnectModal() {
 }
 
 export default function App() {
-  const { modules, psStatus, loadModules, loadSettings, checkFirstRun, initUpdaterListeners, appendLog, checkExistingSession, clearTenantSession, tenantSession, sessionCheckDone, openConnectModal, firstRun } = useStore()
+  const { modules, psStatus, loadModules, loadSettings, checkFirstRun, initUpdaterListeners, appendLog, checkExistingSession, clearTenantSession } = useStore()
 
   useEffect(() => {
     loadSettings()
@@ -621,12 +621,6 @@ export default function App() {
     }
   }, [])
 
-  // Open connect modal on startup when no session is found (after check completes)
-  useEffect(() => {
-    if (sessionCheckDone && !tenantSession && !firstRun) {
-      openConnectModal()
-    }
-  }, [sessionCheckDone])
 
   return (
     <Router>
