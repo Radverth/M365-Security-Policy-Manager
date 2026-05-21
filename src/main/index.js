@@ -58,6 +58,8 @@ app.on('before-quit', (e) => {
   e.preventDefault()
   _quitting = true
   logger.info('App closing — disconnecting Graph session')
+  const [win] = BrowserWindow.getAllWindows()
+  if (win && !win.isDestroyed()) win.webContents.send('app:disconnecting')
   Promise.race([
     psSession.disconnect(),
     new Promise(r => setTimeout(r, 3000)),
