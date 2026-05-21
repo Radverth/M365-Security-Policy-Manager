@@ -7,6 +7,16 @@ const psSession = require('./psSession')
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
+async function gracefulDisconnect(win) {
+  if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+    try { win.webContents.send('app:disconnecting') } catch {}
+  }
+  await Promise.race([
+    psSession.disconnect(),
+    new Promise(r => setTimeout(r, 3000)),
+  ]).catch(() => {})
+}
+
 function createWindow() {
   Menu.setApplicationMenu(null)
 
@@ -36,6 +46,15 @@ function createWindow() {
 
   registerIpcHandlers(win)
   setupAutoUpdater(win, isDev)
+
+  // Intercept window close while a session is active — the window is still
+  // alive here so IPC reaches the renderer, the overlay shows, then we destroy.
+  win.on('close', (e) => {
+    if (!psSession.alive) return
+    e.preventDefault()
+    logger.info('Window closing — disconnecting Graph session')
+    gracefulDisconnect(win).then(() => win.destroy())
+  })
 }
 
 app.whenReady().then(() => {
@@ -50,18 +69,14 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-// Disconnect the Graph session on close so the token cache is cleared and the
-// next launch always starts a fresh login rather than reusing a cached token.
+// Fallback for macOS Cmd+Q (quit triggered before any window closes) or
+// any other quit path where win.on('close') hasn't already disconnected.
 let _quitting = false
 app.on('before-quit', (e) => {
   if (_quitting || !psSession.alive) return
   e.preventDefault()
   _quitting = true
-  logger.info('App closing — disconnecting Graph session')
+  logger.info('App quitting — disconnecting Graph session')
   const [win] = BrowserWindow.getAllWindows()
-  if (win && !win.isDestroyed()) win.webContents.send('app:disconnecting')
-  Promise.race([
-    psSession.disconnect(),
-    new Promise(r => setTimeout(r, 3000)),
-  ]).catch(() => {}).finally(() => app.quit())
+  gracefulDisconnect(win).then(() => app.quit())
 })
