@@ -49,6 +49,11 @@ contextBridge.exposeInMainWorld('api', {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
     getLogDir: () => ipcRenderer.invoke('app:getLogDir'),
+    onDisconnecting: (cb) => {
+      const h = () => cb()
+      ipcRenderer.on('app:disconnecting', h)
+      return () => ipcRenderer.removeListener('app:disconnecting', h)
+    },
   },
 
   // Auto-updater

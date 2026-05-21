@@ -669,8 +669,32 @@ function ConnectModal() {
   )
 }
 
+function SigningOutOverlay() {
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center"
+      style={{ background: 'rgba(16, 24, 40, 0.82)', backdropFilter: 'blur(4px)' }}>
+      <div className="bg-white rounded-2xl shadow-2xl px-10 py-8 flex flex-col items-center gap-5 max-w-xs w-full mx-4">
+        <div className="w-14 h-14 rounded-xl flex items-center justify-center" style={{ background: '#1a2d4a' }}>
+          <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+          </svg>
+        </div>
+        <div className="text-center">
+          <p className="text-base font-semibold text-gray-900">Signing out</p>
+          <p className="text-sm text-gray-400 mt-1">Clearing your session…</p>
+        </div>
+        <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none" style={{ color: '#1a2d4a' }}>
+          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.2" />
+          <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+        </svg>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const { modules, psStatus, loadModules, loadSettings, checkFirstRun, initUpdaterListeners, appendLog, checkExistingSession, clearTenantSession } = useStore()
+  const [signingOut, setSigningOut] = useState(false)
 
   useEffect(() => {
     loadSettings()
@@ -683,10 +707,12 @@ export default function App() {
       const unsubOut = window.api.onPsOutput((line) => appendLog(line, 'output'))
       const unsubErr = window.api.onPsError((line) => appendLog(line, 'error'))
       const unsubDisc = window.api.onSessionDisconnected?.(() => clearTenantSession())
+      const unsubQuit = window.api.app?.onDisconnecting?.(() => setSigningOut(true))
       return () => {
         unsubOut?.()
         unsubErr?.()
         unsubDisc?.()
+        unsubQuit?.()
       }
     }
   }, [])
@@ -713,6 +739,7 @@ export default function App() {
       <SwitchTenantModal />
       <UpdaterModal />
       <Notifications />
+      {signingOut && <SigningOutOverlay />}
     </Router>
   )
 }
