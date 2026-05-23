@@ -268,7 +268,7 @@ function WamConnect() {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function ManagePolicies() {
-  const { addNotification, tenantSession, openConnectModal, openSwitchModal, disconnectSession } = useStore()
+  const { addNotification, tenantSession, openConnectModal, openSwitchModal } = useStore()
   const [authMode, setAuthMode] = useState('itglue')
   const [credentials, setCredentials] = useState(null)
   const [connectedAs, setConnectedAs] = useState(null)
@@ -322,12 +322,16 @@ export default function ManagePolicies() {
     }
   }, [tenantSession])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleSwitchTenant = () => {
-    setConnectedAs(null)
-    setPolicies([])
-    setSelectedRows(new Set())
-    disconnectSession()
-  }
+  // Clear local state when the global session is disconnected
+  useEffect(() => {
+    if (!tenantSession) {
+      setConnectedAs(null)
+      setPolicies([])
+      setSelectedRows(new Set())
+    }
+  }, [tenantSession])
+
+  const handleSwitchTenant = () => openSwitchModal()
 
   const filtered = policies.filter((p) => {
     if (managedOnly && !isToolManaged(p.DisplayName)) return false

@@ -671,7 +671,7 @@ function EmptyState() {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function SecurityReport() {
-  const { tenantSession, openConnectModal } = useStore()
+  const { tenantSession, openConnectModal, openSwitchModal } = useStore()
   const [orgName, setOrgName] = useState('')
   const [status, setStatus] = useState('idle')
   const [report, setReport] = useState(null)
@@ -735,9 +735,17 @@ export default function SecurityReport() {
             <>
               {/* Connected tenant info */}
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
-                  <p className="text-xs font-semibold text-emerald-700">Connected</p>
+                <div className="flex items-center justify-between gap-2 mb-0.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                    <p className="text-xs font-semibold text-emerald-700">Connected</p>
+                  </div>
+                  <button
+                    onClick={openSwitchModal}
+                    className="text-xs text-emerald-600 hover:text-emerald-800 font-medium underline underline-offset-2"
+                  >
+                    Switch
+                  </button>
                 </div>
                 <p className="text-xs text-emerald-800 truncate pl-3.5">{tenantSession.Account}</p>
               </div>
