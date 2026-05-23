@@ -699,7 +699,7 @@ function SigningOutOverlay() {
 }
 
 export default function App() {
-  const { modules, psStatus, loadModules, loadSettings, checkFirstRun, initUpdaterListeners, appendLog, appendModuleLog, checkExistingSession, clearTenantSession } = useStore()
+  const { modules, psStatus, loadModules, loadSettings, checkFirstRun, initUpdaterListeners, appendLog, checkExistingSession, clearTenantSession } = useStore()
   const [signingOut, setSigningOut] = useState(false)
 
   useEffect(() => {
@@ -710,14 +710,8 @@ export default function App() {
     checkExistingSession()
 
     if (window.api) {
-      const unsubOut = window.api.onPsOutput((line) => {
-        appendLog(line, 'output')
-        if (useStore.getState().moduleOpInProgress) appendModuleLog(line, 'output')
-      })
-      const unsubErr = window.api.onPsError((line) => {
-        appendLog(line, 'error')
-        if (useStore.getState().moduleOpInProgress) appendModuleLog(line, 'error')
-      })
+      const unsubOut = window.api.onPsOutput((line) => appendLog(line, 'output'))
+      const unsubErr = window.api.onPsError((line) => appendLog(line, 'error'))
       const unsubDisc = window.api.onSessionDisconnected?.(() => clearTenantSession())
       const unsubQuit = window.api.app?.onDisconnecting?.(() => setSigningOut(true))
       return () => {

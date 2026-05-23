@@ -5,7 +5,6 @@ import ProgressStep from '../components/ProgressStep'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import Badge from '../components/Badge'
-import LogPanel from '../components/LogPanel'
 import SearchInput from '../components/SearchInput'
 import Modal from '../components/Modal'
 import ConfigurePolicies from './ConfigurePolicies'
@@ -594,7 +593,6 @@ function StepDeploy({ logs, results, selectedIds, running }) {
   const selectedPolicies = POLICIES.filter((p) => selectedIds.includes(p.id))
   return (
     <div className="space-y-4">
-      <LogPanel logs={logs} height="h-52" title="Deployment Output" />
       {Object.keys(results).length > 0 && (
         <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Policy Results</p>

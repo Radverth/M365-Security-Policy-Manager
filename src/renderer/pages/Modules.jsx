@@ -3,7 +3,6 @@ import useStore from '../store'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import Button from '../components/Button'
-import LogPanel from '../components/LogPanel'
 import StatusIndicator from '../components/StatusIndicator'
 import Tooltip from '../components/Tooltip'
 
@@ -22,7 +21,7 @@ function statusBadge(status) {
 export default function Modules() {
   const {
     modules, modulesLoading, psStatus, loadModules, addNotification,
-    moduleOpInProgress, setModuleOpInProgress, moduleLogs, clearModuleLogs,
+    moduleOpInProgress, setModuleOpInProgress,
   } = useStore()
   const [installing, setInstalling] = useState(new Set())
   const [installingPs, setInstallingPs] = useState(false)
@@ -46,7 +45,6 @@ export default function Modules() {
     if (!window.api) return
     setInstalling((s) => new Set([...s, moduleName]))
     setModuleOpInProgress(true)
-    clearModuleLogs()
     try {
       const result = await window.api.modules.install([moduleName])
       notifyResult(result || [], `${moduleName} installed successfully`)
@@ -63,7 +61,6 @@ export default function Modules() {
     if (!window.api) return
     setInstalling((s) => new Set([...s, moduleName]))
     setModuleOpInProgress(true)
-    clearModuleLogs()
     try {
       const result = await window.api.modules.update([moduleName])
       notifyResult(result || [], `${moduleName} updated successfully`)
@@ -81,7 +78,6 @@ export default function Modules() {
     const toInstall = modules.filter((m) => m.Status === 'not_installed').map((m) => m.Name)
     if (!toInstall.length) { addNotification('All modules are already installed', 'info'); return }
     setModuleOpInProgress(true)
-    clearModuleLogs()
     try {
       const result = await window.api.modules.install(toInstall)
       notifyResult(result || [], 'All missing modules installed successfully')
@@ -98,7 +94,6 @@ export default function Modules() {
     const toUpdate = modules.filter((m) => m.Status === 'update_available').map((m) => m.Name)
     if (!toUpdate.length) { addNotification('No updates available', 'info'); return }
     setModuleOpInProgress(true)
-    clearModuleLogs()
     try {
       const result = await window.api.modules.update(toUpdate)
       notifyResult(result || [], 'All modules updated successfully')
@@ -113,7 +108,6 @@ export default function Modules() {
   const handleInstallPs = async () => {
     if (!window.api) return
     setInstallingPs(true)
-    clearModuleLogs()
     try {
       const result = await window.api.modules.installPowerShell()
       if (result.success) {
@@ -268,9 +262,6 @@ export default function Modules() {
       </Card>
 
       {/* Log panel */}
-      {(moduleLogs.length > 0 || moduleOpInProgress || installingPs) && (
-        <LogPanel logs={moduleLogs} height="h-56" title="Installation Output" active={moduleOpInProgress || installingPs} />
-      )}
     </div>
   )
 }
