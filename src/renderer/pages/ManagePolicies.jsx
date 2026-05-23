@@ -268,7 +268,7 @@ function WamConnect() {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function ManagePolicies() {
-  const { addNotification, tenantSession, openConnectModal, openSwitchModal } = useStore()
+  const { addNotification, tenantSession, openConnectModal, openSwitchModal, disconnectSession } = useStore()
   const [authMode, setAuthMode] = useState('itglue')
   const [credentials, setCredentials] = useState(null)
   const [connectedAs, setConnectedAs] = useState(null)
@@ -322,10 +322,11 @@ export default function ManagePolicies() {
     }
   }, [tenantSession])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleDisconnect = () => {
+  const handleSwitchTenant = () => {
     setConnectedAs(null)
     setPolicies([])
     setSelectedRows(new Set())
+    disconnectSession()
   }
 
   const filtered = policies.filter((p) => {
@@ -444,7 +445,7 @@ export default function ManagePolicies() {
                   <p className="text-sm font-semibold text-emerald-900">{effectiveSession.Account}</p>
                 </div>
               </div>
-              <Button size="sm" variant="secondary" onClick={tenantSession ? openSwitchModal : handleDisconnect}>
+              <Button size="sm" variant="secondary" onClick={handleSwitchTenant}>
                 Switch Tenant
               </Button>
             </div>

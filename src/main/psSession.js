@@ -26,11 +26,15 @@ class PersistentPsSession {
       env: { ...process.env },
     })
 
+    const sendToWin = (channel, msg) => {
+      if (win && !win.isDestroyed()) win.webContents.send(channel, msg)
+    }
+
     this.proc.stdout.on('data', (data) => {
       for (const raw of data.toString().split(/\r?\n/)) {
         const line = raw.trim()
         if (!line) continue
-        if (!this._suppressUiOutput) win?.webContents?.send('ps:output', line)
+        if (!this._suppressUiOutput) sendToWin('ps:output', line)
         for (const h of [...this.lineHandlers]) h(line)
       }
     })
@@ -38,13 +42,13 @@ class PersistentPsSession {
     this.proc.stderr.on('data', (data) => {
       for (const raw of data.toString().split(/\r?\n/)) {
         const line = raw.trim()
-        if (line) win?.webContents?.send('ps:error', line)
+        if (line) sendToWin('ps:error', line)
       }
     })
 
     this.proc.on('exit', () => {
       this.proc = null; this.context = null; this.lineHandlers = []
-      win?.webContents?.send('session:disconnected')
+      sendToWin('session:disconnected')
     })
     this.proc.on('error', () => {
       this.proc = null; this.context = null; this.lineHandlers = []
@@ -122,7 +126,7 @@ try {
 
     if (silentCtx) {
       this.context = silentCtx
-      this._win?.webContents?.send('ps:output', `CONNECTED: Authenticated as ${silentCtx.Account} (cached)`)
+      if (this._win && !this._win.isDestroyed()) this._win.webContents.send('ps:output', `CONNECTED: Authenticated as ${silentCtx.Account} (cached)`)
       return silentCtx
     }
 

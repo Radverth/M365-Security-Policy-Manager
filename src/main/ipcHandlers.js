@@ -9,6 +9,7 @@ const path = require('path')
 const { execFile } = require('child_process')
 const fs = require('fs')
 const psSession = require('./psSession')
+const HTMLtoDOCX = require('html-to-docx')
 
 
 
@@ -463,6 +464,155 @@ ${recommendations.length > 0 ? recSection(recommendations, esc, date) : ''}
 </html>`
 }
 
+function generateDocxHtml(orgName, policies, date, nameMap = {}, recommendations = []) {
+  function esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
+  const pv = (obj, ...keys) => { for (const k of keys) { if (obj?.[k] != null) return obj[k] } return null }
+  const stateOf = p => p.State || p.state || 'unknown'
+  const stateLabel = s => ({ enabled: 'Enabled', disabled: 'Disabled', enabledForReportingButNotEnforced: 'Report Only' }[s] || s)
+  const stateClass = s => s === 'enabled' ? 'enabled' : s === 'disabled' ? 'disabled' : 'report-only'
+
+  const CTRL_LABELS = { mfa: 'Require MFA', compliantDevice: 'Require Compliant Device', domainJoinedDevice: 'Require Hybrid AD Join', approvedApplication: 'Require Approved App', compliantApplication: 'Require App Protection', block: 'Block Access', passwordChange: 'Require Password Change' }
+  const PLATFORM_LABELS = { android: 'Android', iOS: 'iOS', macOS: 'macOS', windows: 'Windows', linux: 'Linux', all: 'All' }
+
+  function fmtUsers(u) {
+    if (!u) return 'All Users'
+    const incU = pv(u, 'IncludeUsers', 'includeUsers') || []
+    const incG = pv(u, 'IncludeGroups', 'includeGroups') || []
+    if (incU.some(x => x.toLowerCase() === 'all')) return 'All Users'
+    const parts = [...(incG.length ? [`${incG.length} group(s)`] : []), ...(incU.length ? [`${incU.length} user(s)`] : [])]
+    return parts.join(', ') || '—'
+  }
+
+  function fmtGrant(g) {
+    if (!g) return '—'
+    const controls = (pv(g, 'BuiltInControls', 'builtInControls') || []).map(c => CTRL_LABELS[c] || c)
+    const op = (pv(g, 'Operator', 'operator') || 'OR').toUpperCase()
+    return controls.join(` ${op} `) || '—'
+  }
+
+  function fmtPlatforms(p) {
+    if (!p) return null
+    const inc = pv(p, 'IncludePlatforms', 'includePlatforms') || []
+    return inc.map(x => PLATFORM_LABELS[x] || x).join(', ') || null
+  }
+
+  function fmtSession(s) {
+    if (!s) return null
+    const parts = []
+    const sf = pv(s, 'SignInFrequency', 'signInFrequency')
+    if (sf && (sf.isEnabled || sf.IsEnabled)) {
+      const val = sf.value ?? sf.Value, type = sf.type || sf.Type
+      parts.push(val && type ? `Sign-in frequency: every ${val} ${type}` : 'Sign-in frequency enforced')
+    }
+    const pb = pv(s, 'PersistentBrowser', 'persistentBrowser')
+    if (pb && (pb.isEnabled || pb.IsEnabled)) parts.push(`Persistent browser: ${pb.mode || pb.Mode || 'configured'}`)
+    return parts.join('; ') || null
+  }
+
+  function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' }
+
+  const enabled    = policies.filter(p => stateOf(p) === 'enabled')
+  const reportOnly = policies.filter(p => stateOf(p) === 'enabledForReportingButNotEnforced')
+  const disabled   = policies.filter(p => stateOf(p) === 'disabled')
+
+  function policyRows(arr) {
+    return arr.map(p => {
+      const state = stateOf(p)
+      const name = esc(pv(p, 'DisplayName', 'displayName') || 'Unnamed')
+      const cond = pv(p, 'Conditions', 'conditions') || {}
+      const users = esc(fmtUsers(pv(cond, 'Users', 'users')))
+      const apps = (() => {
+        const a = pv(cond, 'Applications', 'applications')
+        if (!a) return 'All Apps'
+        const inc = pv(a, 'IncludeApplications', 'includeApplications') || []
+        if (inc.some(x => x.toLowerCase() === 'all')) return 'All Applications'
+        return inc.length ? `${inc.length} application(s)` : '—'
+      })()
+      const platforms = esc(fmtPlatforms(pv(cond, 'Platforms', 'platforms')) || '—')
+      const grant = esc(fmtGrant(pv(p, 'GrantControls', 'grantControls')))
+      const session = esc(fmtSession(pv(p, 'SessionControls', 'sessionControls')) || '—')
+      const created = fmtDate(pv(p, 'CreatedDateTime', 'createdDateTime'))
+      const modified = fmtDate(pv(p, 'ModifiedDateTime', 'modifiedDateTime'))
+      return `<tr>
+        <td style="border-left:3px solid ${state === 'enabled' ? '#22c55e' : state === 'disabled' ? '#d1d5db' : '#f59e0b'}">${name}</td>
+        <td><span class="badge ${stateClass(state)}">${stateLabel(state)}</span></td>
+        <td>${users}</td>
+        <td>${esc(apps)}</td>
+        <td>${platforms}</td>
+        <td>${grant}</td>
+        <td>${session}</td>
+        <td style="white-space:nowrap">${created}</td>
+        <td style="white-space:nowrap">${modified}</td>
+      </tr>`
+    }).join('')
+  }
+
+  function recSection(recs) {
+    if (!recs.length) return ''
+    const SEV_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low', info: 'Info' }
+    const cards = recs.map(r => {
+      const pct = r.totalCaCount > 0 ? Math.round((r.presentCount / r.totalCaCount) * 100) : 100
+      const missingRows = r.missingItems.map(item =>
+        `<tr><td style="font-family:monospace;font-size:10px;color:#6b7280">${esc(item.id)}</td><td>${esc(item.name)}</td><td style="color:#dc2626;font-weight:700">${SEV_LABEL[item.severity] || item.severity}</td></tr>`
+      ).join('')
+      return `<h3 style="margin:16px 0 6px;font-size:12px;color:#1a2d4a">${esc(r.name)} &mdash; ${pct}% (${r.presentCount}/${r.totalCaCount} CA policies found)</h3>
+${r.missingItems.length === 0
+  ? `<p style="color:#16a34a;font-weight:600">&#10003; All baseline CA policies detected</p>`
+  : `<table><thead><tr><th>ID</th><th>Recommended Policy</th><th>Severity</th></tr></thead><tbody>${missingRows}</tbody></table>`}
+${r.unverifiableCount > 0 ? `<p style="color:#9ca3af;font-size:10px;margin-top:4px">+ ${r.unverifiableCount} Identity Protection policies &mdash; requires separate Entra ID review</p>` : ''}`
+    }).join('')
+    return `<h2>Baseline Coverage &amp; Recommendations</h2>
+<p style="font-size:10px;background:#fffbeb;padding:8px;border:1px solid #fde68a;border-radius:4px;margin-bottom:12px;color:#92400e">
+  Note: Matching uses the policy ID (e.g., CA001) in the display name. Policies must include the ID in their name to be detected.
+</p>
+${cards}`
+  }
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 12px; line-height: 1.5; color: #1f2937; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e5e7eb; font-size: 11px; }
+th { font-weight: 700; background: #f3f4f6; color: #374151; }
+h1 { font-size: 20px; font-weight: 700; color: #1a2d4a; margin-bottom: 4px; }
+h2 { font-size: 14px; font-weight: 700; color: #1a2d4a; margin: 20px 0 8px; border-bottom: 2px solid #e5e7eb; padding-bottom: 4px; }
+h3 { font-size: 12px; font-weight: 700; color: #374151; margin: 12px 0 6px; }
+p { margin-bottom: 8px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: 700; }
+.enabled { background: #dcfce7; color: #15803d; }
+.disabled { background: #f3f4f6; color: #6b7280; }
+.report-only { background: #fef3c7; color: #b45309; }
+</style>
+</head>
+<body>
+<h1>${esc(orgName || 'Tenant')} &mdash; M365 Security Policy Report</h1>
+<p style="color:#6b7280;font-size:11px">Generated ${esc(date)} &middot; Affinity Technology &middot; Confidential</p>
+
+<h2>Summary</h2>
+<table>
+<thead><tr><th>Total Policies</th><th>Enabled</th><th>Report Only</th><th>Disabled</th></tr></thead>
+<tbody><tr><td>${policies.length}</td><td>${enabled.length}</td><td>${reportOnly.length}</td><td>${disabled.length}</td></tr></tbody>
+</table>
+
+<h2>All Conditional Access Policies</h2>
+<table>
+<thead><tr><th>Policy Name</th><th>Status</th><th>Users</th><th>Apps</th><th>Platforms</th><th>Grant Controls</th><th>Session Controls</th><th>Created</th><th>Modified</th></tr></thead>
+<tbody>
+${policyRows([...enabled, ...reportOnly, ...disabled])}
+</tbody>
+</table>
+
+${recSection(recommendations)}
+
+<p style="font-size:10px;color:#9ca3af;margin-top:24px;border-top:1px solid #e5e7eb;padding-top:8px">Generated by M365 Security Policy Manager &middot; Affinity Technology &middot; ${esc(date)} &middot; Confidential</p>
+</body>
+</html>`
+}
+
 function registerIpcHandlers(win) {
   // Store
   ipcMain.handle('store:get', (_, key) => store.get(key))
@@ -876,6 +1026,38 @@ Write-Output "NAME_MAP_END"`,
     } finally {
       printWin.destroy()
       try { fs.unlinkSync(tmpPath) } catch {}
+    }
+  })
+
+  // App: save Word doc
+  ipcMain.handle('app:saveDocx', async (_, orgName, policiesData, nameMap = {}, recommendations = []) => {
+    const sanitised = (orgName || 'report')
+      .replace(/[^a-zA-Z0-9\s\-_]/g, '')
+      .replace(/\s+/g, '_')
+      .slice(0, 80)
+    const timestamp = new Date().toISOString().slice(0, 10)
+    const defaultFilename = `SecurityReport_${sanitised}_${timestamp}.docx`
+
+    const { filePath, canceled } = await dialog.showSaveDialog(win, {
+      title: 'Save Security Report as Word Document',
+      defaultPath: path.join(app.getPath('documents'), defaultFilename),
+      filters: [{ name: 'Word Documents', extensions: ['docx'] }],
+    })
+    if (canceled || !filePath) return { cancelled: true }
+
+    const policies = Array.isArray(policiesData) ? policiesData : []
+    const date = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })
+    const html = generateDocxHtml(orgName, policies, date, nameMap || {}, recommendations || [])
+    try {
+      const buffer = await HTMLtoDOCX(html, null, {
+        table: { row: { cantSplit: true } },
+        footer: true,
+        pageNumber: true,
+      })
+      fs.writeFileSync(filePath, buffer)
+      return { path: filePath }
+    } catch (err) {
+      return { error: err.message }
     }
   })
 

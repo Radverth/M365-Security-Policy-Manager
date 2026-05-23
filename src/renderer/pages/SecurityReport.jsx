@@ -129,17 +129,19 @@ function formatSessionControls(sc) {
 
 // ── Baseline recommendations ──────────────────────────────────────────────────
 
-const _norm = s => s.toLowerCase().replace(/[^a-z0-9]/g, '')
 const _POLICY_MAP = Object.fromEntries(POLICIES.map(p => [p.id, p]))
 
-function computeRecommendations(tenantPolicies) {
-  return BASELINES.map(baseline => {
+function computeRecommendations(tenantPolicies, selectedBaselineIds = null) {
+  const baselines = selectedBaselineIds
+    ? BASELINES.filter(b => selectedBaselineIds.includes(b.id))
+    : BASELINES
+  return baselines.map(baseline => {
     const items = baseline.policyIds.map(id => {
       const policy = _POLICY_MAP[id]
       if (!policy) return null
       if (id.startsWith('IP')) return { id, name: policy.name, severity: policy.severity, status: 'unverifiable' }
-      const target = _norm(policy.name)
-      const found = tenantPolicies.some(p => _norm(pick(p, 'DisplayName', 'displayName') || '').includes(target))
+      const idPattern = new RegExp(`\\b${id}\\b`)
+      const found = tenantPolicies.some(p => idPattern.test(pick(p, 'DisplayName', 'displayName') || ''))
       return { id, name: policy.name, severity: policy.severity, status: found ? 'present' : 'missing' }
     }).filter(Boolean)
     const caItems = items.filter(i => i.status !== 'unverifiable')
@@ -214,7 +216,7 @@ function RecommendationsSection({ recommendations }) {
       <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Baseline Coverage</p>
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 mb-4">
         <p className="text-xs text-amber-800">
-          <span className="font-semibold">Note:</span> Matching uses display name similarity — policies deployed with custom prefixes or names may not be detected. Identity Protection policies (IP*) are not included in the CA audit and require a separate Entra ID review.
+          <span className="font-semibold">Note:</span> Matching uses the policy ID (e.g., CA001) in the display name — policies must include the ID somewhere in their name (e.g. "CA001: Require MFA" or "Prefix — CA001: ...") to be detected. Identity Protection policies (IP*) require a separate Entra ID review.
         </p>
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -527,31 +529,47 @@ function AffinityReportHeader({ orgName, date }) {
 
 // ── Report view ───────────────────────────────────────────────────────────────
 
-function ReportView({ orgName, tenantPolicies, nameMap = {}, date }) {
-  const [saving, setSaving] = useState(false)
+function ReportView({ orgName, tenantPolicies, nameMap = {}, date, selectedBaselines = null }) {
+  const [savingPDF, setSavingPDF] = useState(false)
+  const [savingDocx, setSavingDocx] = useState(false)
   const [savedPath, setSavedPath] = useState(null)
   const enabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabled').length
   const reportOnly = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabledForReportingButNotEnforced').length
   const disabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'disabled').length
-  const recommendations = useMemo(() => computeRecommendations(tenantPolicies), [tenantPolicies])
+  const recommendations = useMemo(
+    () => computeRecommendations(tenantPolicies, selectedBaselines),
+    [tenantPolicies, selectedBaselines]
+  )
 
   async function handleExportPDF() {
-    setSaving(true)
+    setSavingPDF(true)
     setSavedPath(null)
     try {
       const result = await window.api.report.savePDF(orgName, tenantPolicies, nameMap, recommendations)
       if (result?.path) {
-        setSavedPath(result.path)
-        setTimeout(() => setSavedPath(null), 6000)
-      } else if (result?.cancelled) {
-        // user cancelled dialog — no-op
+        setSavedPath('pdf')
+        setTimeout(() => setSavedPath(null), 5000)
       }
-    } catch (e) {
-      // swallow
-    } finally {
-      setSaving(false)
+    } catch {} finally {
+      setSavingPDF(false)
     }
   }
+
+  async function handleExportDocx() {
+    setSavingDocx(true)
+    setSavedPath(null)
+    try {
+      const result = await window.api.report.saveDocx(orgName, tenantPolicies, nameMap, recommendations)
+      if (result?.path) {
+        setSavedPath('docx')
+        setTimeout(() => setSavedPath(null), 5000)
+      }
+    } catch {} finally {
+      setSavingDocx(false)
+    }
+  }
+
+  const saving = savingPDF || savingDocx
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -566,24 +584,21 @@ function ReportView({ orgName, tenantPolicies, nameMap = {}, date }) {
         </div>
         <div className="ml-auto flex items-center gap-2">
           {savedPath && (
-            <span className="text-xs text-emerald-600 font-medium">Saved to Documents</span>
+            <span className="text-xs text-emerald-600 font-medium">
+              {savedPath === 'pdf' ? 'PDF saved' : 'Word doc saved'}
+            </span>
           )}
-          <Button variant="secondary" onClick={handleExportPDF} loading={saving}>
-            {savedPath ? (
-              <>
-                <svg className="w-4 h-4 mr-1.5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-                Saved
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                </svg>
-                Save PDF
-              </>
-            )}
+          <Button variant="secondary" onClick={handleExportPDF} loading={savingPDF} disabled={saving}>
+            <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+            Save PDF
+          </Button>
+          <Button variant="secondary" onClick={handleExportDocx} loading={savingDocx} disabled={saving}>
+            <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Save Word
           </Button>
         </div>
       </div>
@@ -661,6 +676,13 @@ export default function SecurityReport() {
   const [status, setStatus] = useState('idle')
   const [report, setReport] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
+  const [selectedBaselines, setSelectedBaselines] = useState(() => BASELINES.map(b => b.id))
+
+  const toggleBaseline = (id) => {
+    setSelectedBaselines(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    )
+  }
 
   useEffect(() => {
     if (tenantSession?.Account && !orgName) {
@@ -731,6 +753,34 @@ export default function SecurityReport() {
                   className="block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
                 />
               </div>
+
+              {/* Baseline selection */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Baselines to include</label>
+                  <button
+                    onClick={() => setSelectedBaselines(
+                      selectedBaselines.length === BASELINES.length ? [] : BASELINES.map(b => b.id)
+                    )}
+                    className="text-xs text-navy hover:underline"
+                  >
+                    {selectedBaselines.length === BASELINES.length ? 'Deselect all' : 'Select all'}
+                  </button>
+                </div>
+                <div className="space-y-1.5">
+                  {BASELINES.map(b => (
+                    <label key={b.id} className="flex items-center gap-2 cursor-pointer group">
+                      <input
+                        type="checkbox"
+                        checked={selectedBaselines.includes(b.id)}
+                        onChange={() => toggleBaseline(b.id)}
+                        className="rounded border-gray-300 text-navy focus:ring-navy"
+                      />
+                      <span className="text-xs text-gray-700 group-hover:text-gray-900 leading-snug">{b.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
             </>
           ) : (
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-center space-y-3">
@@ -785,6 +835,7 @@ export default function SecurityReport() {
             tenantPolicies={report.policies}
             nameMap={report.nameMap}
             date={report.date}
+            selectedBaselines={selectedBaselines.length > 0 ? selectedBaselines : null}
           />
         ) : (
           <EmptyState />

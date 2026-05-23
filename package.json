@@ -96,6 +96,7 @@
     "axios": "^1.7.2",
     "electron-store": "^8.2.0",
     "electron-updater": "^6.8.3",
+    "html-to-docx": "^1.8.0",
     "node-pty": "^1.0.0"
   },
   "devDependencies": {
