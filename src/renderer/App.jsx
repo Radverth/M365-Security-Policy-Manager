@@ -17,7 +17,7 @@ import UpdaterModal from './components/UpdaterModal'
 
 const VERSION = '1.1.0'
 
-function NavItem({ to, icon, label, end }) {
+function NavItem({ to, icon, label, end, badge }) {
   return (
     <NavLink
       to={to}
@@ -42,7 +42,13 @@ function NavItem({ to, icon, label, end }) {
           ].join(' ')}>
             {icon}
           </span>
-          <span>{label}</span>
+          <span className="flex-1">{label}</span>
+          {badge && (
+            <svg className="animate-spin w-3.5 h-3.5 text-gold flex-shrink-0" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+            </svg>
+          )}
         </>
       )}
     </NavLink>
@@ -157,7 +163,7 @@ function SwitchTenantModal() {
 }
 
 function Sidebar({ modules, psStatus }) {
-  const { updateInfo, updaterStatus, showUpdater, tenantSession, openConnectModal, openSwitchModal } = useStore()
+  const { updateInfo, updaterStatus, showUpdater, tenantSession, openConnectModal, openSwitchModal, moduleOpInProgress } = useStore()
   const installed = modules.filter((m) => m.Status === 'up_to_date').length
   const total = modules.length
   const healthStatus = !psStatus?.found
@@ -216,7 +222,7 @@ function Sidebar({ modules, psStatus }) {
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
           </svg>
         } />
-        <NavItem to="/modules" label="Modules" icon={
+        <NavItem to="/modules" label="Modules" badge={moduleOpInProgress} icon={
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
           </svg>
@@ -669,8 +675,32 @@ function ConnectModal() {
   )
 }
 
+function SigningOutOverlay() {
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center"
+      style={{ background: 'rgba(16, 24, 40, 0.82)', backdropFilter: 'blur(4px)' }}>
+      <div className="bg-white rounded-2xl shadow-2xl px-10 py-8 flex flex-col items-center gap-5 max-w-xs w-full mx-4">
+        <div className="w-14 h-14 rounded-xl flex items-center justify-center" style={{ background: '#1a2d4a' }}>
+          <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+          </svg>
+        </div>
+        <div className="text-center">
+          <p className="text-base font-semibold text-gray-900">Signing out</p>
+          <p className="text-sm text-gray-400 mt-1">Clearing your session…</p>
+        </div>
+        <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none" style={{ color: '#1a2d4a' }}>
+          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.2" />
+          <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+        </svg>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const { modules, psStatus, loadModules, loadSettings, checkFirstRun, initUpdaterListeners, appendLog, checkExistingSession, clearTenantSession } = useStore()
+  const [signingOut, setSigningOut] = useState(false)
 
   useEffect(() => {
     loadSettings()
@@ -683,10 +713,12 @@ export default function App() {
       const unsubOut = window.api.onPsOutput((line) => appendLog(line, 'output'))
       const unsubErr = window.api.onPsError((line) => appendLog(line, 'error'))
       const unsubDisc = window.api.onSessionDisconnected?.(() => clearTenantSession())
+      const unsubQuit = window.api.app?.onDisconnecting?.(() => setSigningOut(true))
       return () => {
         unsubOut?.()
         unsubErr?.()
         unsubDisc?.()
+        unsubQuit?.()
       }
     }
   }, [])
@@ -713,6 +745,7 @@ export default function App() {
       <SwitchTenantModal />
       <UpdaterModal />
       <Notifications />
+      {signingOut && <SigningOutOverlay />}
     </Router>
   )
 }

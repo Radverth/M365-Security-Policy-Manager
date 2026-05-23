@@ -92,6 +92,10 @@ const useStore = create((set, get) => ({
     })),
   clearLogs: () => set({ logs: [] }),
 
+  // ── Module operations ─────────────────────────────────────────────────────
+  moduleOpInProgress: false,
+  setModuleOpInProgress: (v) => set({ moduleOpInProgress: v }),
+
   notifications: [],
   addNotification: (msg, type = 'info') => {
     const id = Date.now() + Math.random()

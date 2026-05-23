@@ -49,6 +49,11 @@ contextBridge.exposeInMainWorld('api', {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
     getLogDir: () => ipcRenderer.invoke('app:getLogDir'),
+    onDisconnecting: (cb) => {
+      const h = () => cb()
+      ipcRenderer.on('app:disconnecting', h)
+      return () => ipcRenderer.removeListener('app:disconnecting', h)
+    },
   },
 
   // Auto-updater
@@ -91,7 +96,8 @@ contextBridge.exposeInMainWorld('api', {
   // Report
   report: {
     audit: () => ipcRenderer.invoke('report:audit'),
-    savePDF: (orgName, policies, nameMap) => ipcRenderer.invoke('app:savePDF', orgName, policies, nameMap),
+    savePDF: (orgName, policies, nameMap, recommendations) => ipcRenderer.invoke('app:savePDF', orgName, policies, nameMap, recommendations),
+    saveDocx: (orgName, policies, nameMap, recommendations) => ipcRenderer.invoke('app:saveDocx', orgName, policies, nameMap, recommendations),
   },
 
   // PS event listeners

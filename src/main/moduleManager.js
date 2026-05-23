@@ -1,5 +1,14 @@
 const { runScript } = require('./powershell')
 
+// Cache module status for 10 minutes to avoid repeated PSGallery network calls on every app launch.
+let _moduleStatusCache = null
+let _moduleStatusCacheAt = 0
+const MODULE_CACHE_TTL_MS = 10 * 60 * 1000
+
+function invalidateModuleCache() {
+  _moduleStatusCache = null
+}
+
 const REQUIRED_MODULES = [
   { name: 'Microsoft.Graph.Authentication', description: 'Microsoft Graph authentication and connection management' },
   { name: 'Microsoft.Graph', description: 'Core Graph API access for policy creation' },
@@ -9,6 +18,11 @@ const REQUIRED_MODULES = [
 ]
 
 async function getModuleStatus(win) {
+  const now = Date.now()
+  if (_moduleStatusCache && (now - _moduleStatusCacheAt) < MODULE_CACHE_TTL_MS) {
+    return _moduleStatusCache
+  }
+
   const moduleNames = REQUIRED_MODULES.map(m => m.name)
   const script = `
 $ProgressPreference = 'SilentlyContinue'
@@ -55,10 +69,13 @@ $results | ConvertTo-Json -Depth 3
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0])
       const arr = Array.isArray(parsed) ? parsed : [parsed]
-      return arr.map(m => ({
+      const result = arr.map(m => ({
         ...m,
         description: REQUIRED_MODULES.find(r => r.name === m.Name)?.description || '',
       }))
+      _moduleStatusCache = result
+      _moduleStatusCacheAt = Date.now()
+      return result
     }
   } catch {}
   return REQUIRED_MODULES.map(m => ({
@@ -107,6 +124,7 @@ if ($IsWindows -and $psEd -eq 'Desktop') {
 `
 
 async function installModules(moduleNames, onData, onError) {
+  invalidateModuleCache()
   const script = `
 ${PS_SILENT_PREFS}
 Write-Output "SETUP: Starting on $(if ($IsLinux) { 'Linux' } elseif ($IsWindows) { 'Windows' } else { 'macOS' })..."
@@ -128,6 +146,7 @@ Write-Output "DONE"
 }
 
 async function updateModules(moduleNames, onData, onError) {
+  invalidateModuleCache()
   const script = `
 ${PS_SILENT_PREFS}
 Write-Output "SETUP: Starting on $(if ($IsLinux) { 'Linux' } elseif ($IsWindows) { 'Windows' } else { 'macOS' })..."
@@ -148,4 +167,4 @@ Write-Output "DONE"
   return runScript(script, onData, onError)
 }
 
-module.exports = { getModuleStatus, installModules, updateModules, REQUIRED_MODULES }
+module.exports = { getModuleStatus, installModules, updateModules, invalidateModuleCache, REQUIRED_MODULES }

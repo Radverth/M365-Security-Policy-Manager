@@ -4,7 +4,6 @@ import { POLICIES } from '../../shared/constants'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import Badge from '../components/Badge'
-import LogPanel from '../components/LogPanel'
 import Modal from '../components/Modal'
 
 function policyName(id) {
@@ -299,17 +298,9 @@ export default function EngineerDeploy() {
   const [authMode, setAuthMode] = useState('itglue')
   const [org, setOrg] = useState(null)
   const [credentials, setCredentials] = useState(null)
-  const [logs, setLogs] = useState([])
   const [results, setResults] = useState({})
   const [running, setRunning] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
-
-  useEffect(() => {
-    if (!window.api) return
-    const unOut = window.api.onPsOutput((line) => setLogs((l) => [...l, { line, type: 'output' }]))
-    const unErr = window.api.onPsError((line) => setLogs((l) => [...l, { line, type: 'error' }]))
-    return () => { unOut?.(); unErr?.() }
-  }, [])
 
   const canNext = () => {
     if (step === 1) return !!selectedTemplate
@@ -326,7 +317,6 @@ export default function EngineerDeploy() {
     if (!window.api || !selectedTemplate) return
     setConfirmOpen(false)
     setRunning(true)
-    setLogs([])
     setResults({})
     const selectedPolicies = POLICIES.filter((p) => selectedTemplate.selectedIds.includes(p.id))
     try {
@@ -349,7 +339,7 @@ export default function EngineerDeploy() {
 
   const reset = () => {
     setStep(1); setSelectedTemplate(null); setOrg(null); setCredentials(null)
-    setLogs([]); setResults({})
+    setResults({})
   }
 
   return (
@@ -412,7 +402,6 @@ export default function EngineerDeploy() {
           )}
           {step === 4 && (
             <div className="space-y-4">
-              <LogPanel logs={logs} height="h-52" title="Deployment Output" />
               {Object.keys(results).length > 0 && (
                 <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Policy Results</p>

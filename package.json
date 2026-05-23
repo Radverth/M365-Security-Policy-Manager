@@ -1,11 +1,11 @@
 {
   "name": "m365-policy-manager",
   "productName": "M365 Security Policy Manager",
-  "version": "1.2.28",
+  "version": "1.2.34",
   "description": "Cross-platform Electron desktop app for M365 security policy management",
   "author": {
     "name": "Tom Austin",
-    "email": "tomaustin94@users.noreply.github.com"
+    "email": "radverth@users.noreply.github.com"
   },
   "main": "src/main/index.js",
   "scripts": {
@@ -19,7 +19,7 @@
     "build": "npm run build:renderer && electron-builder"
   },
   "build": {
-    "appId": "com.tomaustin94.m365-security-policy-manager",
+    "appId": "com.radverth.m365-security-policy-manager",
     "productName": "M365 Security Policy Manager",
     "copyright": "Copyright © 2025 AffinityIT",
     "artifactName": "m365-policy-manager-${version}-${arch}.${ext}",
@@ -41,7 +41,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "tomaustin94",
+        "owner": "radverth",
         "repo": "m365-security-policy-manager",
         "releaseType": "release"
       }
@@ -96,6 +96,7 @@
     "axios": "^1.7.2",
     "electron-store": "^8.2.0",
     "electron-updater": "^6.8.3",
+    "html-to-docx": "^1.8.0",
     "node-pty": "^1.0.0"
   },
   "devDependencies": {

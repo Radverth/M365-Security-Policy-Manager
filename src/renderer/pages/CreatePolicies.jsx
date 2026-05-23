@@ -5,7 +5,6 @@ import ProgressStep from '../components/ProgressStep'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import Badge from '../components/Badge'
-import LogPanel from '../components/LogPanel'
 import SearchInput from '../components/SearchInput'
 import Modal from '../components/Modal'
 import ConfigurePolicies from './ConfigurePolicies'
@@ -594,7 +593,6 @@ function StepDeploy({ logs, results, selectedIds, running }) {
   const selectedPolicies = POLICIES.filter((p) => selectedIds.includes(p.id))
   return (
     <div className="space-y-4">
-      <LogPanel logs={logs} height="h-52" title="Deployment Output" />
       {Object.keys(results).length > 0 && (
         <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Policy Results</p>
@@ -626,7 +624,7 @@ const STEPS_SESSION = ['Configure Prefix', 'Select Policies', 'Configure Policie
 
 // ── Main wizard ───────────────────────────────────────────────────────────────
 export default function CreatePolicies() {
-  const { settings, addNotification, tenantSession, openConnectModal } = useStore()
+  const { settings, addNotification, tenantSession, openConnectModal, openSwitchModal } = useStore()
 
   const baselinePolicyIds = (() => {
     try {
@@ -760,7 +758,7 @@ export default function CreatePolicies() {
             <p className="text-sm font-semibold text-emerald-800">Connected to {tenantSession.Account}</p>
             <p className="text-xs text-emerald-600 mt-0.5">Policies will be deployed to this tenant using your active session.</p>
           </div>
-          <button onClick={openConnectModal} className="text-xs text-emerald-600 hover:text-emerald-800 font-medium flex-shrink-0 underline underline-offset-2">
+          <button onClick={openSwitchModal} className="text-xs text-emerald-600 hover:text-emerald-800 font-medium flex-shrink-0 underline underline-offset-2">
             Switch tenant
           </button>
         </div>

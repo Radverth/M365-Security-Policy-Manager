@@ -5,7 +5,6 @@ import Button from '../components/Button'
 import Badge from '../components/Badge'
 import Modal from '../components/Modal'
 import SearchInput from '../components/SearchInput'
-import LogPanel from '../components/LogPanel'
 
 // Handle PascalCase (PS) and camelCase (Graph API) property names
 function pick(obj, ...keys) {
@@ -284,17 +283,8 @@ export default function ManagePolicies() {
   const [bulkLoading, setBulkLoading] = useState(false)
   const [editTarget, setEditTarget] = useState(null)
   const [saveLoading, setSaveLoading] = useState(false)
-  const [authLogs, setAuthLogs] = useState([])
-
   // Effective connection: prefer local connectedAs, fall back to global session
   const effectiveSession = connectedAs || tenantSession
-
-  useEffect(() => {
-    if (!window.api) return
-    const unOut = window.api.onPsOutput((line) => setAuthLogs((l) => [...l, { line, type: 'output' }]))
-    const unErr = window.api.onPsError((line) => setAuthLogs((l) => [...l, { line, type: 'error' }]))
-    return () => { unOut?.(); unErr?.() }
-  }, [])
 
   const handleAuthModeChange = (mode) => {
     setAuthMode(mode)
@@ -308,7 +298,6 @@ export default function ManagePolicies() {
   const handleLoad = async () => {
     if (!window.api) return
     setLoading(true)
-    setAuthLogs([])
     try {
       const result = await window.api.policies.list()
       if (result?.error) {
@@ -333,12 +322,16 @@ export default function ManagePolicies() {
     }
   }, [tenantSession])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleDisconnect = () => {
-    setConnectedAs(null)
-    setPolicies([])
-    setSelectedRows(new Set())
-    setAuthLogs([])
-  }
+  // Clear local state when the global session is disconnected
+  useEffect(() => {
+    if (!tenantSession) {
+      setConnectedAs(null)
+      setPolicies([])
+      setSelectedRows(new Set())
+    }
+  }, [tenantSession])
+
+  const handleSwitchTenant = () => openSwitchModal()
 
   const filtered = policies.filter((p) => {
     if (managedOnly && !isToolManaged(p.DisplayName)) return false
@@ -456,7 +449,7 @@ export default function ManagePolicies() {
                   <p className="text-sm font-semibold text-emerald-900">{effectiveSession.Account}</p>
                 </div>
               </div>
-              <Button size="sm" variant="secondary" onClick={tenantSession ? openSwitchModal : handleDisconnect}>
+              <Button size="sm" variant="secondary" onClick={handleSwitchTenant}>
                 Switch Tenant
               </Button>
             </div>
@@ -479,9 +472,6 @@ export default function ManagePolicies() {
             <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
               <p className="font-medium mb-1">Loading policies…</p>
             </div>
-          )}
-          {authLogs.length > 0 && (
-            <LogPanel logs={authLogs} height="h-28" title="Connection Output" />
           )}
         </Card.Body>
       </Card>

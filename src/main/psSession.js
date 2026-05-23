@@ -9,6 +9,8 @@ class PersistentPsSession {
     this.proc = null
     this.lineHandlers = []
     this.context = null  // { Account, TenantId }
+    this._suppressUiOutput = false
+    this._win = null
   }
 
   get alive() {
@@ -17,17 +19,22 @@ class PersistentPsSession {
   }
 
   async start(win) {
+    this._win = win
     const pwshPath = process.platform === 'win32' ? 'pwsh.exe' : 'pwsh'
     this.proc = spawn(pwshPath, ['-NoProfile', '-NonInteractive', '-Command', '-'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env },
     })
 
+    const sendToWin = (channel, msg) => {
+      if (win && !win.isDestroyed()) win.webContents.send(channel, msg)
+    }
+
     this.proc.stdout.on('data', (data) => {
       for (const raw of data.toString().split(/\r?\n/)) {
         const line = raw.trim()
         if (!line) continue
-        win?.webContents?.send('ps:output', line)
+        if (!this._suppressUiOutput) sendToWin('ps:output', line)
         for (const h of [...this.lineHandlers]) h(line)
       }
     })
@@ -35,13 +42,13 @@ class PersistentPsSession {
     this.proc.stderr.on('data', (data) => {
       for (const raw of data.toString().split(/\r?\n/)) {
         const line = raw.trim()
-        if (line) win?.webContents?.send('ps:error', line)
+        if (line) sendToWin('ps:error', line)
       }
     })
 
     this.proc.on('exit', () => {
       this.proc = null; this.context = null; this.lineHandlers = []
-      win?.webContents?.send('session:disconnected')
+      sendToWin('session:disconnected')
     })
     this.proc.on('error', () => {
       this.proc = null; this.context = null; this.lineHandlers = []
@@ -90,6 +97,40 @@ class PersistentPsSession {
       ? `-LoginHint '${String(credentials.username).replace(/'/g, "''")}'`
       : ''
     const scopes = 'Policy.ReadWrite.ConditionalAccess Policy.Read.All DeviceManagementConfiguration.ReadWrite.All Organization.ReadWrite.All Directory.ReadWrite.All RoleManagement.ReadWrite.Directory AuditLog.Read.All'
+
+    const parseContext = (output) => {
+      const ctxMatch = output.match(/CONTEXT_JSON_START\r?\n([\s\S]*?)\r?\nCONTEXT_JSON_END/)
+      if (!ctxMatch) return null
+      try { return JSON.parse(ctxMatch[1]) } catch { return null }
+    }
+
+    // Try silent auth first — reuses the MSAL token cache so returning users skip the device code prompt.
+    // Suppress UI output so JSON markers don't appear in the log panel.
+    this._suppressUiOutput = true
+    let silentCtx = null
+    try {
+      const silentOut = await this._exec(`
+try {
+  Connect-MgGraph -ContextScope CurrentUser -Scopes "${scopes}" -NoWelcome -Silent -ErrorAction Stop
+  $ctx = Get-MgContext
+  if ($ctx) {
+    Write-Output "CONTEXT_JSON_START"
+    @{ Account = $ctx.Account; TenantId = $ctx.TenantId } | ConvertTo-Json
+    Write-Output "CONTEXT_JSON_END"
+  }
+} catch {}
+`, null, 30000)
+      silentCtx = parseContext(silentOut)
+    } catch {}
+    this._suppressUiOutput = false
+
+    if (silentCtx) {
+      this.context = silentCtx
+      if (this._win && !this._win.isDestroyed()) this._win.webContents.send('ps:output', `CONNECTED: Authenticated as ${silentCtx.Account} (cached)`)
+      return silentCtx
+    }
+
+    // Silent failed — fall back to device code.
     const output = await this._exec(`
 try {
   Write-Output "Connecting to Microsoft Graph..."
@@ -109,9 +150,8 @@ try {
 `, null, 180000)
     const errLine = output.split('\n').find(l => l.trim().startsWith('ERROR:'))
     if (errLine) throw new Error(errLine.trim().slice('ERROR:'.length).trim())
-    const ctxMatch = output.match(/CONTEXT_JSON_START\r?\n([\s\S]*?)\r?\nCONTEXT_JSON_END/)
-    if (!ctxMatch) throw new Error('Authentication failed — no session context returned')
-    const ctx = JSON.parse(ctxMatch[1])
+    const ctx = parseContext(output)
+    if (!ctx) throw new Error('Authentication failed — no session context returned')
     this.context = ctx
     return ctx
   }

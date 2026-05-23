@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import useStore from '../store'
 import Button from '../components/Button'
+import { BASELINES } from '../data/baselines.js'
+import { POLICIES } from '../../shared/constants.js'
 
 // ── Data helpers ──────────────────────────────────────────────────────────────
 
@@ -123,6 +125,105 @@ function formatSessionControls(sc) {
   const aer = pick(sc, 'ApplicationEnforcedRestrictions', 'applicationEnforcedRestrictions')
   if (aer?.IsEnabled || aer?.isEnabled) parts.push('App enforced restrictions')
   return parts
+}
+
+// ── Baseline recommendations ──────────────────────────────────────────────────
+
+const _POLICY_MAP = Object.fromEntries(POLICIES.map(p => [p.id, p]))
+
+function computeRecommendations(tenantPolicies, selectedBaselineIds = null) {
+  const baselines = selectedBaselineIds
+    ? BASELINES.filter(b => selectedBaselineIds.includes(b.id))
+    : BASELINES
+  return baselines.map(baseline => {
+    const items = baseline.policyIds.map(id => {
+      const policy = _POLICY_MAP[id]
+      if (!policy) return null
+      if (id.startsWith('IP')) return { id, name: policy.name, severity: policy.severity, status: 'unverifiable' }
+      const idPattern = new RegExp(`\\b${id}\\b`)
+      const found = tenantPolicies.some(p => idPattern.test(pick(p, 'DisplayName', 'displayName') || ''))
+      return { id, name: policy.name, severity: policy.severity, status: found ? 'present' : 'missing' }
+    }).filter(Boolean)
+    const caItems = items.filter(i => i.status !== 'unverifiable')
+    const presentCount = caItems.filter(i => i.status === 'present').length
+    return {
+      ...baseline,
+      items,
+      presentCount,
+      totalCaCount: caItems.length,
+      missingItems: items.filter(i => i.status === 'missing'),
+      unverifiableCount: items.filter(i => i.status === 'unverifiable').length,
+    }
+  })
+}
+
+const SEV_STYLE = {
+  critical: { background: '#fef2f2', color: '#dc2626' },
+  high:     { background: '#fff7ed', color: '#ea580c' },
+  medium:   { background: '#fffbeb', color: '#ca8a04' },
+  low:      { background: '#f0fdf4', color: '#16a34a' },
+  info:     { background: '#f0f9ff', color: '#0369a1' },
+}
+
+function BaselineRecommendationCard({ baseline }) {
+  const { name, missingItems, presentCount, totalCaCount, unverifiableCount } = baseline
+  const pct = totalCaCount > 0 ? Math.round((presentCount / totalCaCount) * 100) : 100
+  const pctColor = pct === 100 ? '#16a34a' : pct >= 70 ? '#d97706' : '#dc2626'
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="flex items-start justify-between gap-4 mb-3">
+        <p className="text-sm font-semibold text-gray-900">{name}</p>
+        <div className="flex-shrink-0 text-right">
+          <p className="text-xl font-bold leading-none" style={{ color: pctColor }}>{pct}%</p>
+          <p className="text-xs text-gray-400 mt-0.5">{presentCount}/{totalCaCount} found</p>
+        </div>
+      </div>
+
+      {missingItems.length === 0 ? (
+        <p className="text-xs text-green-700 flex items-center gap-1.5">
+          <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+          All baseline CA policies detected
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          <p className="text-xs font-semibold text-gray-500 mb-2">Recommended additions:</p>
+          {missingItems.map(item => (
+            <div key={item.id} className="flex items-center gap-2">
+              <span className="text-xs font-mono text-gray-400 w-12 flex-shrink-0">{item.id}</span>
+              <span className="text-xs text-gray-700 flex-1 min-w-0">{item.name}</span>
+              <span className="text-xs font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                style={SEV_STYLE[item.severity] || SEV_STYLE.info}>{item.severity}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {unverifiableCount > 0 && (
+        <p className="text-xs text-gray-400 mt-2 pt-2 border-t border-gray-100">
+          + {unverifiableCount} Identity Protection {unverifiableCount === 1 ? 'policy' : 'policies'} — requires separate Entra ID review
+        </p>
+      )}
+    </div>
+  )
+}
+
+function RecommendationsSection({ recommendations }) {
+  return (
+    <div className="mt-6">
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Baseline Coverage</p>
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 mb-4">
+        <p className="text-xs text-amber-800">
+          <span className="font-semibold">Note:</span> Matching uses the policy ID (e.g., CA001) in the display name — policies must include the ID somewhere in their name (e.g. "CA001: Require MFA" or "Prefix — CA001: ...") to be detected. Identity Protection policies (IP*) require a separate Entra ID review.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {recommendations.map(r => <BaselineRecommendationCard key={r.id} baseline={r} />)}
+      </div>
+    </div>
+  )
 }
 
 // ── Progress UI for report generation ────────────────────────────────────────
@@ -428,30 +529,47 @@ function AffinityReportHeader({ orgName, date }) {
 
 // ── Report view ───────────────────────────────────────────────────────────────
 
-function ReportView({ orgName, tenantPolicies, nameMap = {}, date }) {
-  const [saving, setSaving] = useState(false)
+function ReportView({ orgName, tenantPolicies, nameMap = {}, date, selectedBaselines = null }) {
+  const [savingPDF, setSavingPDF] = useState(false)
+  const [savingDocx, setSavingDocx] = useState(false)
   const [savedPath, setSavedPath] = useState(null)
   const enabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabled').length
   const reportOnly = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabledForReportingButNotEnforced').length
   const disabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'disabled').length
+  const recommendations = useMemo(
+    () => computeRecommendations(tenantPolicies, selectedBaselines),
+    [tenantPolicies, selectedBaselines]
+  )
 
   async function handleExportPDF() {
-    setSaving(true)
+    setSavingPDF(true)
     setSavedPath(null)
     try {
-      const result = await window.api.report.savePDF(orgName, tenantPolicies, nameMap)
+      const result = await window.api.report.savePDF(orgName, tenantPolicies, nameMap, recommendations)
       if (result?.path) {
-        setSavedPath(result.path)
-        setTimeout(() => setSavedPath(null), 6000)
-      } else if (result?.cancelled) {
-        // user cancelled dialog — no-op
+        setSavedPath('pdf')
+        setTimeout(() => setSavedPath(null), 5000)
       }
-    } catch (e) {
-      // swallow
-    } finally {
-      setSaving(false)
+    } catch {} finally {
+      setSavingPDF(false)
     }
   }
+
+  async function handleExportDocx() {
+    setSavingDocx(true)
+    setSavedPath(null)
+    try {
+      const result = await window.api.report.saveDocx(orgName, tenantPolicies, nameMap, recommendations)
+      if (result?.path) {
+        setSavedPath('docx')
+        setTimeout(() => setSavedPath(null), 5000)
+      }
+    } catch {} finally {
+      setSavingDocx(false)
+    }
+  }
+
+  const saving = savingPDF || savingDocx
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -466,24 +584,21 @@ function ReportView({ orgName, tenantPolicies, nameMap = {}, date }) {
         </div>
         <div className="ml-auto flex items-center gap-2">
           {savedPath && (
-            <span className="text-xs text-emerald-600 font-medium">Saved to Documents</span>
+            <span className="text-xs text-emerald-600 font-medium">
+              {savedPath === 'pdf' ? 'PDF saved' : 'Word doc saved'}
+            </span>
           )}
-          <Button variant="secondary" onClick={handleExportPDF} loading={saving}>
-            {savedPath ? (
-              <>
-                <svg className="w-4 h-4 mr-1.5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-                Saved
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                </svg>
-                Save PDF
-              </>
-            )}
+          <Button variant="secondary" onClick={handleExportPDF} loading={savingPDF} disabled={saving}>
+            <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+            Save PDF
+          </Button>
+          <Button variant="secondary" onClick={handleExportDocx} loading={savingDocx} disabled={saving}>
+            <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Save Word
           </Button>
         </div>
       </div>
@@ -528,6 +643,8 @@ function ReportView({ orgName, tenantPolicies, nameMap = {}, date }) {
             This report covers Conditional Access policies only. GUIDs are shown where display names are unavailable.
           </p>
         </div>
+
+        <RecommendationsSection recommendations={recommendations} />
       </div>
     </div>
   )
@@ -554,11 +671,18 @@ function EmptyState() {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function SecurityReport() {
-  const { tenantSession, openConnectModal } = useStore()
+  const { tenantSession, openConnectModal, openSwitchModal } = useStore()
   const [orgName, setOrgName] = useState('')
   const [status, setStatus] = useState('idle')
   const [report, setReport] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
+  const [selectedBaselines, setSelectedBaselines] = useState(() => BASELINES.map(b => b.id))
+
+  const toggleBaseline = (id) => {
+    setSelectedBaselines(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    )
+  }
 
   useEffect(() => {
     if (tenantSession?.Account && !orgName) {
@@ -611,9 +735,17 @@ export default function SecurityReport() {
             <>
               {/* Connected tenant info */}
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
-                  <p className="text-xs font-semibold text-emerald-700">Connected</p>
+                <div className="flex items-center justify-between gap-2 mb-0.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                    <p className="text-xs font-semibold text-emerald-700">Connected</p>
+                  </div>
+                  <button
+                    onClick={openSwitchModal}
+                    className="text-xs text-emerald-600 hover:text-emerald-800 font-medium underline underline-offset-2"
+                  >
+                    Switch
+                  </button>
                 </div>
                 <p className="text-xs text-emerald-800 truncate pl-3.5">{tenantSession.Account}</p>
               </div>
@@ -628,6 +760,34 @@ export default function SecurityReport() {
                   placeholder="e.g. Contoso"
                   className="block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
                 />
+              </div>
+
+              {/* Baseline selection */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Baselines to include</label>
+                  <button
+                    onClick={() => setSelectedBaselines(
+                      selectedBaselines.length === BASELINES.length ? [] : BASELINES.map(b => b.id)
+                    )}
+                    className="text-xs text-navy hover:underline"
+                  >
+                    {selectedBaselines.length === BASELINES.length ? 'Deselect all' : 'Select all'}
+                  </button>
+                </div>
+                <div className="space-y-1.5">
+                  {BASELINES.map(b => (
+                    <label key={b.id} className="flex items-center gap-2 cursor-pointer group">
+                      <input
+                        type="checkbox"
+                        checked={selectedBaselines.includes(b.id)}
+                        onChange={() => toggleBaseline(b.id)}
+                        className="rounded border-gray-300 text-navy focus:ring-navy"
+                      />
+                      <span className="text-xs text-gray-700 group-hover:text-gray-900 leading-snug">{b.name}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
             </>
           ) : (
@@ -683,6 +843,7 @@ export default function SecurityReport() {
             tenantPolicies={report.policies}
             nameMap={report.nameMap}
             date={report.date}
+            selectedBaselines={selectedBaselines.length > 0 ? selectedBaselines : null}
           />
         ) : (
           <EmptyState />

@@ -3,7 +3,6 @@ import useStore from '../store'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import Button from '../components/Button'
-import LogPanel from '../components/LogPanel'
 import StatusIndicator from '../components/StatusIndicator'
 import Tooltip from '../components/Tooltip'
 
@@ -20,27 +19,15 @@ function statusBadge(status) {
 }
 
 export default function Modules() {
-  const { modules, modulesLoading, psStatus, loadModules, appendLog, addNotification } = useStore()
-  const [logs, setLogs] = useState([])
+  const {
+    modules, modulesLoading, psStatus, loadModules, addNotification,
+    moduleOpInProgress, setModuleOpInProgress,
+  } = useStore()
   const [installing, setInstalling] = useState(new Set())
-  const [operationRunning, setOperationRunning] = useState(false)
   const [installingPs, setInstallingPs] = useState(false)
 
   useEffect(() => {
     loadModules()
-  }, [])
-
-  useEffect(() => {
-    if (!window.api) return
-    const unOut = window.api.onPsOutput((line) => {
-      setLogs((l) => [...l, { line, type: 'output' }])
-      appendLog(line, 'output')
-    })
-    const unErr = window.api.onPsError((line) => {
-      setLogs((l) => [...l, { line, type: 'error' }])
-      appendLog(line, 'error')
-    })
-    return () => { unOut?.(); unErr?.() }
   }, [])
 
   function notifyResult(resultLogs, successMsg) {
@@ -57,8 +44,7 @@ export default function Modules() {
   const handleInstall = async (moduleName) => {
     if (!window.api) return
     setInstalling((s) => new Set([...s, moduleName]))
-    setOperationRunning(true)
-    setLogs([])
+    setModuleOpInProgress(true)
     try {
       const result = await window.api.modules.install([moduleName])
       notifyResult(result || [], `${moduleName} installed successfully`)
@@ -67,15 +53,14 @@ export default function Modules() {
       addNotification(`Install failed: ${err.message}`, 'error')
     } finally {
       setInstalling((s) => { const ns = new Set(s); ns.delete(moduleName); return ns })
-      setOperationRunning(false)
+      setModuleOpInProgress(false)
     }
   }
 
   const handleUpdate = async (moduleName) => {
     if (!window.api) return
     setInstalling((s) => new Set([...s, moduleName]))
-    setOperationRunning(true)
-    setLogs([])
+    setModuleOpInProgress(true)
     try {
       const result = await window.api.modules.update([moduleName])
       notifyResult(result || [], `${moduleName} updated successfully`)
@@ -84,7 +69,7 @@ export default function Modules() {
       addNotification(`Update failed: ${err.message}`, 'error')
     } finally {
       setInstalling((s) => { const ns = new Set(s); ns.delete(moduleName); return ns })
-      setOperationRunning(false)
+      setModuleOpInProgress(false)
     }
   }
 
@@ -92,8 +77,7 @@ export default function Modules() {
     if (!window.api) return
     const toInstall = modules.filter((m) => m.Status === 'not_installed').map((m) => m.Name)
     if (!toInstall.length) { addNotification('All modules are already installed', 'info'); return }
-    setOperationRunning(true)
-    setLogs([])
+    setModuleOpInProgress(true)
     try {
       const result = await window.api.modules.install(toInstall)
       notifyResult(result || [], 'All missing modules installed successfully')
@@ -101,7 +85,7 @@ export default function Modules() {
     } catch (err) {
       addNotification(`Install all failed: ${err.message}`, 'error')
     } finally {
-      setOperationRunning(false)
+      setModuleOpInProgress(false)
     }
   }
 
@@ -109,8 +93,7 @@ export default function Modules() {
     if (!window.api) return
     const toUpdate = modules.filter((m) => m.Status === 'update_available').map((m) => m.Name)
     if (!toUpdate.length) { addNotification('No updates available', 'info'); return }
-    setOperationRunning(true)
-    setLogs([])
+    setModuleOpInProgress(true)
     try {
       const result = await window.api.modules.update(toUpdate)
       notifyResult(result || [], 'All modules updated successfully')
@@ -118,14 +101,13 @@ export default function Modules() {
     } catch (err) {
       addNotification(`Update all failed: ${err.message}`, 'error')
     } finally {
-      setOperationRunning(false)
+      setModuleOpInProgress(false)
     }
   }
 
   const handleInstallPs = async () => {
     if (!window.api) return
     setInstallingPs(true)
-    setLogs([])
     try {
       const result = await window.api.modules.installPowerShell()
       if (result.success) {
@@ -152,19 +134,19 @@ export default function Modules() {
           <p className="mt-1 text-sm text-gray-500">Manage required modules for M365 policy management</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="secondary" size="sm" onClick={loadModules} loading={modulesLoading} disabled={operationRunning}>
+          <Button variant="secondary" size="sm" onClick={loadModules} loading={modulesLoading} disabled={moduleOpInProgress}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
             Check Status
           </Button>
           {updateAvail > 0 && (
-            <Button variant="secondary" size="sm" onClick={handleUpdateAll} loading={operationRunning}>
+            <Button variant="secondary" size="sm" onClick={handleUpdateAll} loading={moduleOpInProgress}>
               Update All ({updateAvail})
             </Button>
           )}
           {notInstalled > 0 && (
-            <Button variant="primary" size="sm" onClick={handleInstallAll} loading={operationRunning}>
+            <Button variant="primary" size="sm" onClick={handleInstallAll} loading={moduleOpInProgress}>
               Install Missing ({notInstalled})
             </Button>
           )}
@@ -251,12 +233,12 @@ export default function Modules() {
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end gap-2">
                           {mod.Status === 'not_installed' && (
-                            <Button size="sm" variant="primary" loading={isLoading} disabled={operationRunning && !isLoading} onClick={() => handleInstall(mod.Name)}>
+                            <Button size="sm" variant="primary" loading={isLoading} disabled={moduleOpInProgress && !isLoading} onClick={() => handleInstall(mod.Name)}>
                               Install
                             </Button>
                           )}
                           {mod.Status === 'update_available' && (
-                            <Button size="sm" variant="secondary" loading={isLoading} disabled={operationRunning && !isLoading} onClick={() => handleUpdate(mod.Name)}>
+                            <Button size="sm" variant="secondary" loading={isLoading} disabled={moduleOpInProgress && !isLoading} onClick={() => handleUpdate(mod.Name)}>
                               Update
                             </Button>
                           )}
@@ -264,7 +246,7 @@ export default function Modules() {
                             <span className="text-xs text-green-600 font-medium px-2">Current</span>
                           )}
                           {mod.Status === 'unknown' && (
-                            <Button size="sm" variant="ghost" loading={isLoading} disabled={operationRunning && !isLoading} onClick={() => handleInstall(mod.Name)}>
+                            <Button size="sm" variant="ghost" loading={isLoading} disabled={moduleOpInProgress && !isLoading} onClick={() => handleInstall(mod.Name)}>
                               Install
                             </Button>
                           )}
@@ -280,9 +262,6 @@ export default function Modules() {
       </Card>
 
       {/* Log panel */}
-      {(logs.length > 0 || operationRunning || installingPs) && (
-        <LogPanel logs={logs} height="h-56" title="Installation Output" active={operationRunning || installingPs} />
-      )}
     </div>
   )
 }
