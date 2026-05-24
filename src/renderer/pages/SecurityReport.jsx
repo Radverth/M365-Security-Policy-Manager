@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import useStore from '../store'
 import Button from '../components/Button'
+import Modal from '../components/Modal'
 import { BASELINES } from '../data/baselines.js'
 import { POLICIES } from '../../shared/constants.js'
 
@@ -601,7 +602,7 @@ const ACCOUNT_MANAGERS = [
 function ReportView({ orgName, tenantPolicies, nameMap = {}, date, selectedBaselines = null }) {
   const [savingPDF, setSavingPDF] = useState(false)
   const [savingDocx, setSavingDocx] = useState(false)
-  const [savedPath, setSavedPath] = useState(null)
+  const [savedModal, setSavedModal] = useState(null) // { type: 'pdf'|'docx', path: string }
   const [accountManager, setAccountManager] = useState(ACCOUNT_MANAGERS[0])
   const enabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabled').length
   const reportOnly = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabledForReportingButNotEnforced').length
@@ -613,13 +614,9 @@ function ReportView({ orgName, tenantPolicies, nameMap = {}, date, selectedBasel
 
   async function handleExportPDF() {
     setSavingPDF(true)
-    setSavedPath(null)
     try {
       const result = await window.api.report.savePDF(orgName, tenantPolicies, nameMap, recommendations)
-      if (result?.path) {
-        setSavedPath('pdf')
-        setTimeout(() => setSavedPath(null), 5000)
-      }
+      if (result?.path) setSavedModal({ type: 'pdf', path: result.path })
     } catch {} finally {
       setSavingPDF(false)
     }
@@ -627,13 +624,9 @@ function ReportView({ orgName, tenantPolicies, nameMap = {}, date, selectedBasel
 
   async function handleExportDocx() {
     setSavingDocx(true)
-    setSavedPath(null)
     try {
       const result = await window.api.report.saveDocx(orgName, tenantPolicies, nameMap, recommendations, accountManager)
-      if (result?.path) {
-        setSavedPath('docx')
-        setTimeout(() => setSavedPath(null), 5000)
-      }
+      if (result?.path) setSavedModal({ type: 'docx', path: result.path })
     } catch {} finally {
       setSavingDocx(false)
     }
@@ -693,11 +686,6 @@ function ReportView({ orgName, tenantPolicies, nameMap = {}, date, selectedBasel
             </div>
           </div>
 
-          {savedPath && (
-            <span className="text-xs text-emerald-600 font-medium">
-              {savedPath === 'pdf' ? 'Technical audit saved' : 'Client proposal saved'}
-            </span>
-          )}
           <div className="flex flex-col items-end gap-0.5">
             <Button variant="secondary" onClick={handleExportPDF} loading={savingPDF} disabled={saving}>
               <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -762,6 +750,28 @@ function ReportView({ orgName, tenantPolicies, nameMap = {}, date, selectedBasel
 
         <RecommendationsSection recommendations={recommendations} />
       </div>
+
+      {/* Export success modal */}
+      <Modal
+        open={!!savedModal}
+        onClose={() => setSavedModal(null)}
+        title={savedModal?.type === 'pdf' ? 'Technical Audit Report saved' : 'Client Proposal saved'}
+        variant="success"
+        size="md"
+      >
+        <div className="mt-2 space-y-4">
+          <p className="text-sm text-gray-600">
+            {savedModal?.type === 'pdf'
+              ? 'Your technical audit report has been exported as a PDF and is ready to share with IT teams and administrators.'
+              : 'Your client proposal has been exported as a Word document and is ready for the sales team to use in client conversations.'}
+          </p>
+          <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3">
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Saved to</p>
+            <p className="text-xs font-mono text-gray-700 break-all leading-relaxed">{savedModal?.path}</p>
+          </div>
+          <p className="text-xs text-gray-400">You can open the file directly from the location above.</p>
+        </div>
+      </Modal>
     </div>
   )
 }
