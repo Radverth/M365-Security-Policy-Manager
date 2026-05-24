@@ -1,7 +1,7 @@
 {
   "name": "m365-policy-manager",
   "productName": "M365 Security Policy Manager",
-  "version": "1.2.61",
+  "version": "1.2.62",
   "description": "Cross-platform Electron desktop app for M365 security policy management",
   "author": {
     "name": "Tom Austin",
