@@ -811,7 +811,15 @@ ${pageBreak()}
 </html>`
 }
 
+let _win = null
+let _handlersRegistered = false
+
 function registerIpcHandlers(win) {
+  _win = win
+
+  if (_handlersRegistered) return
+  _handlersRegistered = true
+
   // Store
   ipcMain.handle('store:get', (_, key) => store.get(key))
   ipcMain.handle('store:set', (_, key, value) => store.set(key, value))
@@ -831,7 +839,7 @@ function registerIpcHandlers(win) {
   // Module status
   ipcMain.handle('modules:getStatus', async () => {
     try {
-      return await getModuleStatus(win)
+      return await getModuleStatus(_win)
     } catch (err) {
       return []
     }
@@ -845,11 +853,11 @@ function registerIpcHandlers(win) {
       moduleNames,
       (line) => {
         logs.push(line)
-        win.webContents.send('ps:output', line)
+        _win.webContents.send('ps:output', line)
       },
       (line) => {
         logs.push(`ERROR: ${line}`)
-        win.webContents.send('ps:error', line)
+        _win.webContents.send('ps:error', line)
       }
     )
     return logs
@@ -863,11 +871,11 @@ function registerIpcHandlers(win) {
       moduleNames,
       (line) => {
         logs.push(line)
-        win.webContents.send('ps:output', line)
+        _win.webContents.send('ps:output', line)
       },
       (line) => {
         logs.push(`ERROR: ${line}`)
-        win.webContents.send('ps:error', line)
+        _win.webContents.send('ps:error', line)
       }
     )
     return logs
@@ -895,12 +903,12 @@ function registerIpcHandlers(win) {
 
       proc.stdout.on('data', (d) => {
         d.toString().split('\n').forEach(line => {
-          if (line.trim()) win.webContents.send('ps:output', line)
+          if (line.trim()) _win.webContents.send('ps:output', line)
         })
       })
       proc.stderr.on('data', (d) => {
         d.toString().split('\n').forEach(line => {
-          if (line.trim()) win.webContents.send('ps:error', line)
+          if (line.trim()) _win.webContents.send('ps:error', line)
         })
       })
       proc.on('close', (code) => {
@@ -920,7 +928,7 @@ function registerIpcHandlers(win) {
   // Session management
   ipcMain.handle('session:connect', async (_, credentials, authMode) => {
     try {
-      if (!psSession.alive) await psSession.start(win)
+      if (!psSession.alive) await psSession.start(_win)
       const context = await psSession.connect(credentials, authMode)
       return { context }
     } catch (err) {
@@ -993,7 +1001,7 @@ function registerIpcHandlers(win) {
     // parseResult must NOT re-send or each line would appear twice in the terminal.
     if (psSession.alive && !hasExo && !hasIpps) {
       logger.info('IPC: policies:create — using persistent session (no re-auth)')
-      win.webContents.send('ps:output', 'CONNECTED: Using active tenant session — deploying policies...')
+      _win.webContents.send('ps:output', 'CONNECTED: Using active tenant session — deploying policies...')
       const script = buildPoliciesScript(policies, prefix || '', policyConfigs || {})
       await psSession.run(script, parseResult, 300000)
       return { logs, results }
@@ -1005,8 +1013,8 @@ function registerIpcHandlers(win) {
     const script = buildScript(policies, credentials, prefix, authMode, policyConfigs || {}, { useDeviceCode })
     await runScript(
       script,
-      (line) => { win.webContents.send('ps:output', line); parseResult(line) },
-      (line) => win.webContents.send('ps:error', line)
+      (line) => { _win.webContents.send('ps:output', line); parseResult(line) },
+      (line) => _win.webContents.send('ps:error', line)
     )
 
     return { logs, results }
@@ -1093,7 +1101,7 @@ try {
           if (line === 'POLICY_JSON_START') { inJsonBlock = true; return }
           if (line === 'POLICY_JSON_END') { inJsonBlock = false; return }
           if (!inJsonBlock && line.trim()) {
-            win.webContents.send('ps:output', line)
+            _win.webContents.send('ps:output', line)
           }
         },
         90000
@@ -1192,7 +1200,7 @@ Write-Output "NAME_MAP_END"`,
     const timestamp = new Date().toISOString().slice(0, 10)
     const defaultFilename = `SecurityReport_${sanitised}_${timestamp}.pdf`
 
-    const { filePath, canceled } = await dialog.showSaveDialog(win, {
+    const { filePath, canceled } = await dialog.showSaveDialog(_win, {
       title: 'Save Security Report',
       defaultPath: path.join(app.getPath('documents'), defaultFilename),
       filters: [{ name: 'PDF Files', extensions: ['pdf'] }],
@@ -1236,7 +1244,7 @@ Write-Output "NAME_MAP_END"`,
     const timestamp = new Date().toISOString().slice(0, 10)
     const defaultFilename = `SecurityReport_${sanitised}_${timestamp}.docx`
 
-    const { filePath, canceled } = await dialog.showSaveDialog(win, {
+    const { filePath, canceled } = await dialog.showSaveDialog(_win, {
       title: 'Save Security Report as Word Document',
       defaultPath: path.join(app.getPath('documents'), defaultFilename),
       filters: [{ name: 'Word Documents', extensions: ['docx'] }],
@@ -1327,3 +1335,5 @@ try {
   })
 
 }
+
+module.exports = { registerIpcHandlers }
