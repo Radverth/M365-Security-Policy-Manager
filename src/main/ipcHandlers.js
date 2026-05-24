@@ -1260,16 +1260,21 @@ Write-Output "NAME_MAP_END"`,
     if (!psSession.alive) return { items: [], error: 'No active session' }
     const safeQ = safe(query || '')
     if (!safeQ) return { items: [] }
-    // Use startsWith filter across displayName, UPN, and mail so searching "tom"
-    // finds tom@domain.com even if the display name doesn't start with "tom"
+    // startsWith in Graph $filter requires ConsistencyLevel:eventual + $count.
+    // Run two separate queries (displayName and UPN/mail) then deduplicate,
+    // because OR across different properties also needs eventual consistency.
     const script = `
 try {
   $q = '${safeQ}'
-  $filter = "startsWith(displayName,'$q') or startsWith(userPrincipalName,'$q') or startsWith(mail,'$q')"
-  $users = Get-MgUser -Filter $filter -Top 15 -Select 'id,displayName,mail,userPrincipalName' -ErrorAction Stop
-  $result = @($users) | ForEach-Object {
-    @{ id = $_.Id; displayName = $_.DisplayName; mail = if ($_.Mail) { $_.Mail } else { $_.UserPrincipalName } }
+  $byName = @(Get-MgUser -Filter "startsWith(displayName,'$q')" -ConsistencyLevel eventual -CountVariable c1 -Top 10 -Select 'id,displayName,mail,userPrincipalName' -ErrorAction SilentlyContinue)
+  $byUpn  = @(Get-MgUser -Filter "startsWith(userPrincipalName,'$q')" -ConsistencyLevel eventual -CountVariable c2 -Top 10 -Select 'id,displayName,mail,userPrincipalName' -ErrorAction SilentlyContinue)
+  $seen = @{}; $combined = @()
+  foreach ($u in ($byUpn + $byName)) {
+    if ($u -and -not $seen.ContainsKey($u.Id)) { $seen[$u.Id] = $true; $combined += $u }
   }
+  $result = @($combined | Select-Object -First 15 | ForEach-Object {
+    @{ id = $_.Id; displayName = $_.DisplayName; mail = if ($_.Mail) { $_.Mail } else { $_.UserPrincipalName } }
+  })
   if ($result.Count -eq 0) { '[]' } else { $result | ConvertTo-Json -Compress }
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
@@ -1292,7 +1297,7 @@ try {
     const script = `
 try {
   $q = '${safeQ}'
-  $groups = Get-MgGroup -Filter "startsWith(displayName,'$q')" -Top 15 -Select 'id,displayName,description' -ErrorAction Stop
+  $groups = Get-MgGroup -Filter "startsWith(displayName,'$q')" -ConsistencyLevel eventual -CountVariable c1 -Top 15 -Select 'id,displayName,description' -ErrorAction Stop
   $result = @($groups) | ForEach-Object {
     @{ id = $_.Id; displayName = $_.DisplayName; description = $_.Description }
   }
