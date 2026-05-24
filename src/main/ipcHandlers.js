@@ -471,7 +471,7 @@ function generateDocxHtml(orgName, policies, date, nameMap = {}, recommendations
   const stateLabel = s => ({ enabled: 'Enabled', disabled: 'Disabled', enabledForReportingButNotEnforced: 'Report Only' }[s] || 'Unknown')
 
   function pageBreak() {
-    return `<p style="page-break-before:always;margin:0;font-size:1pt">&nbsp;</p>`
+    return `<p style="page-break-before:always;break-before:page;margin:0;">&nbsp;</p>`
   }
 
   // Try to embed the Affinity IT cover JPEG as base64; fall back to styled text.
@@ -480,8 +480,25 @@ function generateDocxHtml(orgName, policies, date, nameMap = {}, recommendations
     const imgPath = app.isPackaged
       ? path.join(process.resourcesPath, 'assets/affinity_it_services_ltd_cover.jpeg')
       : path.join(__dirname, '../../assets/affinity_it_services_ltd_cover.jpeg')
-    const imgBase64 = fs.readFileSync(imgPath).toString('base64')
-    coverImgHtml = `<img src="data:image/jpeg;base64,${imgBase64}" width="648" style="display:block;margin-bottom:16px" />`
+    const imgData = fs.readFileSync(imgPath)
+    const imgBase64 = imgData.toString('base64')
+    // Calculate height to maintain aspect ratio at width=648 by parsing JPEG SOF marker
+    let imgHeight = 162 // fallback: correct for the 1585×397 cover image
+    for (let i = 0; i < imgData.length - 8;) {
+      if (imgData[i] === 0xFF) {
+        const marker = imgData[i + 1]
+        if (marker >= 0xC0 && marker <= 0xC3) {
+          const h = (imgData[i + 5] << 8) | imgData[i + 6]
+          const w = (imgData[i + 7] << 8) | imgData[i + 8]
+          if (w > 0) imgHeight = Math.round(648 * h / w)
+          break
+        }
+        if (marker === 0xD8 || marker === 0xD9) { i += 2; continue }
+        const segLen = (imgData[i + 2] << 8) | imgData[i + 3]
+        i += 2 + segLen
+      } else i++
+    }
+    coverImgHtml = `<img src="data:image/jpeg;base64,${imgBase64}" width="648" height="${imgHeight}" style="display:block;margin-bottom:16px" />`
   } catch {
     coverImgHtml = `<div style="border-top:6px solid #E8A830;padding-top:12px;margin-bottom:16px"><div style="font-size:38pt;font-weight:200;color:#1a2d4a;letter-spacing:-2px;line-height:1">Affinity IT</div><div style="font-size:11pt;color:#E8A830;margin-top:6px;letter-spacing:1px">Technology. Together.</div></div>`
   }
@@ -687,7 +704,7 @@ ${coverImgHtml}
 ${pageBreak()}
 
 <!-- ═══ EXECUTIVE SUMMARY ═══════════════════════════════════════════════════ -->
-<h2>Executive Summary</h2>
+<h2 style="font-size:14pt;font-weight:700;color:#1a2d4a;margin:32px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Executive Summary</h2>
 <p>This report documents the Conditional Access policy configuration for <strong>${esc(orgName || 'your organisation')}</strong>
 as of <strong>${esc(date)}</strong>. Conditional Access is the enforcement layer in Microsoft Entra ID that controls who can
 access cloud applications, from which devices and locations, and under what conditions.</p>
@@ -715,7 +732,7 @@ and compared the configuration against Microsoft&rsquo;s recommended security ba
 
 ${recommendations.length > 0 ? `
 <!-- ═══ BASELINE COMPLIANCE ══════════════════════════════════════════════════ -->
-<h2>Baseline Compliance Overview</h2>
+<h2 style="font-size:14pt;font-weight:700;color:#1a2d4a;margin:32px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Baseline Compliance Overview</h2>
 <p>The table below shows how the current Conditional Access configuration compares against Microsoft&rsquo;s recommended security baselines.
 Each baseline represents a curated set of policies addressing a specific security scenario.</p>
 
@@ -734,7 +751,7 @@ Each baseline represents a curated set of policies addressing a specific securit
 ${pageBreak()}
 
 <!-- ═══ GAP ANALYSIS ═════════════════════════════════════════════════════════ -->
-<h2>Gap Analysis &amp; Recommendations</h2>
+<h2 style="font-size:14pt;font-weight:700;color:#1a2d4a;margin:32px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Gap Analysis &amp; Recommendations</h2>
 <p>The following section details each missing policy, its business risk, and the specific protection it provides. These findings form the
 basis of the recommended action plan. Policies are matched by ID in their display name <em>or</em> by their configuration, so
 any existing policy with the correct settings is detected regardless of its name.</p>
@@ -745,7 +762,7 @@ ${allMissing.length > 0 ? `
 ${pageBreak()}
 
 <!-- ═══ ACTION PLAN ══════════════════════════════════════════════════════════ -->
-<h2>Recommended Action Plan</h2>
+<h2 style="font-size:14pt;font-weight:700;color:#1a2d4a;margin:32px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Recommended Action Plan</h2>
 <p>The table below consolidates all recommended policies across the selected baselines, ordered by priority. Affinity IT
 can assist with the design, testing (Report Only mode), and phased enforcement of these policies in your environment.</p>
 
@@ -779,7 +796,7 @@ can assist with the design, testing (Report Only mode), and phased enforcement o
 ${pageBreak()}
 
 <!-- ═══ POLICY INVENTORY ══════════════════════════════════════════════════════ -->
-<h2>Conditional Access Policy Inventory</h2>
+<h2 style="font-size:14pt;font-weight:700;color:#1a2d4a;margin:32px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Conditional Access Policy Inventory</h2>
 <p>The following table lists all ${policies.length} Conditional Access ${policies.length === 1 ? 'policy' : 'policies'} currently configured in your tenant.</p>
 
 <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
@@ -1261,6 +1278,8 @@ Write-Output "NAME_MAP_END"`,
         table: { row: { cantSplit: true } },
         footer: true,
         pageNumber: true,
+        font: 'Calibri',
+        fontSize: 22,
       })
       fs.writeFileSync(filePath, buffer)
       return { path: filePath }

@@ -29,7 +29,7 @@ function Avatar({ name, size = 'sm' }) {
  *   selected   – Array<{ id, displayName, mail?, description? }>
  *   onChange   – (items) => void
  *   disabled   – boolean
- *   noSession  – boolean   show a plain-text fallback instead
+ *   noSession  – boolean   suppress live search; show Object ID entry only
  */
 export default function EntityPicker({ type = 'users', selected = [], onChange, disabled, noSession }) {
   const [query,   setQuery]   = useState('')
@@ -50,6 +50,12 @@ export default function EntityPicker({ type = 'users', selected = [], onChange, 
       setResults([])
       return
     }
+    if (noSession) {
+      // No live session — Object ID entry only, no IPC call needed
+      setResults([])
+      setError(null)
+      return
+    }
     setLoading(true)
     setError(null)
     const fn = type === 'users'
@@ -64,7 +70,7 @@ export default function EntityPicker({ type = 'users', selected = [], onChange, 
       })
       .catch(e => { setError(e.message); setResults([]) })
       .finally(() => setLoading(false))
-  }, [debouncedQuery, type])
+  }, [debouncedQuery, type, noSession])
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -102,10 +108,14 @@ export default function EntityPicker({ type = 'users', selected = [], onChange, 
   }
 
   const visibleResults = results.filter(r => !selectedIds.has(r.id))
-  const placeholder = type === 'users' ? 'Search by name or email…' : 'Search by group name…'
-  const hint        = type === 'users'
-    ? 'Search for users, or paste an Object ID and press Enter'
-    : 'Search for groups, or paste an Object ID and press Enter'
+  const placeholder = noSession
+    ? 'Paste an Object ID and press Enter…'
+    : type === 'users' ? 'Search by name or email…' : 'Search by group name…'
+  const hint = noSession
+    ? 'Connect a tenant to enable live search — or paste an Object ID and press Enter to add directly'
+    : type === 'users'
+      ? 'Search for users, or paste an Object ID and press Enter'
+      : 'Search for groups, or paste an Object ID and press Enter'
 
   return (
     <div className="space-y-2" ref={containerRef}>
