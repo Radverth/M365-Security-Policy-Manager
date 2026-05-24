@@ -5,6 +5,7 @@ import Button from '../components/Button'
 import Badge from '../components/Badge'
 import Modal from '../components/Modal'
 import SearchInput from '../components/SearchInput'
+import EntityPicker from '../components/EntityPicker'
 
 // Handle PascalCase (PS) and camelCase (Graph API) property names
 function pick(obj, ...keys) {
@@ -108,8 +109,9 @@ function PolicyEditor({ policy, onSave, onCancel, saving }) {
   const grant    = pick(policy,'GrantControls','grantControls') || {}
   const hasAuthStrength = !!(pick(grant,'AuthenticationStrength','authenticationStrength'))
 
-  const initExcGrps  = (pick(condUsers,'ExcludeGroups','excludeGroups') || []).join(', ')
-  const initExcUsers = (pick(condUsers,'ExcludeUsers','excludeUsers') || []).join(', ')
+  // Existing exclusions — pre-populate as { id } objects (display names resolved via search)
+  const initExcGrps  = (pick(condUsers,'ExcludeGroups','excludeGroups') || []).map(id => ({ id, displayName: id }))
+  const initExcUsers = (pick(condUsers,'ExcludeUsers','excludeUsers') || []).map(id => ({ id, displayName: id }))
   const initControls = new Set(pick(grant,'BuiltInControls','builtInControls') || [])
   const initOperator = pick(grant,'Operator','operator') || 'OR'
 
@@ -126,8 +128,8 @@ function PolicyEditor({ policy, onSave, onCancel, saving }) {
   })
 
   const handleSave = () => {
-    const excGrpIds  = excludeGroups.split(',').map(s => s.trim()).filter(Boolean)
-    const excUserIds = excludeUsers.split(',').map(s => s.trim()).filter(Boolean)
+    const excGrpIds  = excludeGroups.map(g => g.id)
+    const excUserIds = excludeUsers.map(u => u.id)
 
     // Preserve existing user inclusions so the PATCH doesn't wipe them
     const incUsers  = pick(condUsers,'IncludeUsers','includeUsers') || []
@@ -219,27 +221,23 @@ function PolicyEditor({ policy, onSave, onCancel, saving }) {
 
       {/* ── User Exclusions ──────────────────────────────────────────────── */}
       <div>
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">User Exclusions</p>
-        <div className="space-y-3">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Exclusions</p>
+        <div className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Exclude Groups</label>
-            <input
-              className={inputCls}
-              value={excludeGroups}
-              onChange={e => setExcludeGroups(e.target.value)}
-              placeholder="Group Object IDs, comma-separated"
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">Exclude Groups</label>
+            <EntityPicker
+              type="groups"
+              selected={excludeGroups}
+              onChange={setExcludeGroups}
             />
-            <p className="text-xs text-gray-400 mt-1">Azure AD Group Object IDs to exclude from this policy</p>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Exclude Users</label>
-            <input
-              className={inputCls}
-              value={excludeUsers}
-              onChange={e => setExcludeUsers(e.target.value)}
-              placeholder="User Object IDs, comma-separated"
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">Exclude Users</label>
+            <EntityPicker
+              type="users"
+              selected={excludeUsers}
+              onChange={setExcludeUsers}
             />
-            <p className="text-xs text-gray-400 mt-1">User Object IDs to exclude (e.g. break-glass accounts)</p>
           </div>
         </div>
       </div>

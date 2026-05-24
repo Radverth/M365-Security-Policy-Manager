@@ -100,6 +100,12 @@ contextBridge.exposeInMainWorld('api', {
     saveDocx: (orgName, policies, nameMap, recommendations) => ipcRenderer.invoke('app:saveDocx', orgName, policies, nameMap, recommendations),
   },
 
+  // Tenant entity search (used by EntityPicker in the editor UI)
+  tenant: {
+    searchUsers:  (query) => ipcRenderer.invoke('tenant:searchUsers',  query),
+    searchGroups: (query) => ipcRenderer.invoke('tenant:searchGroups', query),
+  },
+
   // PS event listeners
   onPsOutput: (cb) => {
     const handler = (_, data) => cb(data)

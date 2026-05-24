@@ -1230,6 +1230,55 @@ Write-Output "NAME_MAP_END"`,
     }
   })
 
-}
+  // Tenant entity search (users & groups) — used by the EntityPicker UI component
+  ipcMain.handle('tenant:searchUsers', async (_, query) => {
+    if (!psSession.alive) return { items: [], error: 'No active session' }
+    const safeQ = safe(query || '')
+    if (!safeQ) return { items: [] }
+    const script = `
+try {
+  $users = Get-MgUser -Search "displayName:${safeQ}" -ConsistencyLevel eventual -Top 10 -Select 'id,displayName,mail,userPrincipalName' -OrderBy displayName -ErrorAction Stop
+  $result = @($users) | ForEach-Object {
+    @{ id = $_.Id; displayName = $_.DisplayName; mail = if ($_.Mail) { $_.Mail } else { $_.UserPrincipalName } }
+  }
+  if ($result.Count -eq 0) { '[]' } else { $result | ConvertTo-Json -Compress }
+} catch {
+  Write-Output "ERROR: $($_.Exception.Message)"
+}`
+    const output = await psSession.run(script)
+    const errorLine = output.split('\n').find(l => l.startsWith('ERROR:'))
+    if (errorLine) return { items: [], error: errorLine.slice(6).trim() }
+    try {
+      const items = JSON.parse(output.trim() || '[]')
+      return { items: Array.isArray(items) ? items : [items] }
+    } catch {
+      return { items: [] }
+    }
+  })
 
-module.exports = { registerIpcHandlers }
+  ipcMain.handle('tenant:searchGroups', async (_, query) => {
+    if (!psSession.alive) return { items: [], error: 'No active session' }
+    const safeQ = safe(query || '')
+    if (!safeQ) return { items: [] }
+    const script = `
+try {
+  $groups = Get-MgGroup -Search "displayName:${safeQ}" -ConsistencyLevel eventual -Top 10 -Select 'id,displayName,description' -OrderBy displayName -ErrorAction Stop
+  $result = @($groups) | ForEach-Object {
+    @{ id = $_.Id; displayName = $_.DisplayName; description = $_.Description }
+  }
+  if ($result.Count -eq 0) { '[]' } else { $result | ConvertTo-Json -Compress }
+} catch {
+  Write-Output "ERROR: $($_.Exception.Message)"
+}`
+    const output = await psSession.run(script)
+    const errorLine = output.split('\n').find(l => l.startsWith('ERROR:'))
+    if (errorLine) return { items: [], error: errorLine.slice(6).trim() }
+    try {
+      const items = JSON.parse(output.trim() || '[]')
+      return { items: Array.isArray(items) ? items : [items] }
+    } catch {
+      return { items: [] }
+    }
+  })
+
+}

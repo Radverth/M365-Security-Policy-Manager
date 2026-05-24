@@ -71,7 +71,7 @@ export default function Modal({
             </svg>
           </button>
         </div>
-        <div className="px-6 pb-2 text-sm text-gray-600">{children}</div>
+        <div className="px-6 pb-2 text-sm text-gray-600 overflow-y-auto max-h-[70vh]">{children}</div>
         {onConfirm && (
           <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
             <Button variant="secondary" onClick={onClose} disabled={loading}>{cancelLabel}</Button>
