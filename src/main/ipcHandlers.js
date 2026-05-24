@@ -469,341 +469,314 @@ function generateDocxHtml(orgName, policies, date, nameMap = {}, recommendations
   const pv = (obj, ...keys) => { for (const k of keys) { if (obj?.[k] != null) return obj[k] } return null }
   const stateOf = p => p.State || p.state || 'unknown'
   const stateLabel = s => ({ enabled: 'Enabled', disabled: 'Disabled', enabledForReportingButNotEnforced: 'Report Only' }[s] || 'Unknown')
-  const stateColors = s => ({
-    enabled:                           { bg: '#dcfce7', text: '#15803d', border: '#22c55e' },
-    enabledForReportingButNotEnforced: { bg: '#fef3c7', text: '#b45309', border: '#f59e0b' },
-    disabled:                          { bg: '#f3f4f6', text: '#6b7280', border: '#d1d5db' },
-  }[s] || { bg: '#f3f4f6', text: '#6b7280', border: '#d1d5db' })
 
-  const SEV = {
-    critical: { bg: '#fef2f2', text: '#dc2626' },
-    high:     { bg: '#fff7ed', text: '#ea580c' },
-    medium:   { bg: '#fffbeb', text: '#ca8a04' },
-    low:      { bg: '#f0fdf4', text: '#16a34a' },
-    info:     { bg: '#f0f9ff', text: '#0369a1' },
+  // ── Policy descriptions for the gap analysis section ────────────────────────
+  const POLICY_DESC = {
+    CA001: 'Requires all users to complete MFA on every sign-in, protecting against compromised passwords — the single most impactful control available.',
+    CA002: 'Blocks legacy authentication protocols (Exchange ActiveSync, SMTP AUTH) which cannot enforce MFA and account for the majority of password-spray attacks.',
+    CA003: 'Enforces MFA for privileged roles (Global Admin, Security Admin, Helpdesk Admin, etc.), protecting your highest-value accounts.',
+    CA004: 'Restricts access to devices enrolled in Intune and marked compliant, or hybrid Azure AD joined — ensuring only managed devices reach corporate data.',
+    CA006: 'Requires MFA before accessing Microsoft Azure management interfaces, protecting critical cloud infrastructure and subscriptions.',
+    CA008: 'Forces a password reset when a user\'s risk is detected as High (e.g. leaked credentials), blocking persistent attacker access.',
+    CA009: 'Requires step-up MFA when a sign-in is flagged as medium or high risk (unusual location, anonymous IP, impossible travel).',
+    CA011: 'Restricts iOS device access to Intune-approved apps with app protection policies, safeguarding corporate data on personal (BYOD) devices.',
+    CA012: 'Restricts Android device access to Intune-approved apps with app protection policies, safeguarding corporate data on personal (BYOD) devices.',
+    CA014: 'Requires MFA for guest and external users accessing shared resources, preventing unauthorised access from outside the organisation.',
+    CA016: 'Prevents persistent browser sessions, requiring re-authentication when the browser is closed to limit session hijacking exposure.',
+    CA018: 'Blocks sign-ins from unmanaged or unsupported device platforms that cannot receive security patches.',
+    CA019: 'Secures MFA method registration through Conditional Access, preventing attackers from enrolling their own authentication methods after a password compromise.',
+    CA026: 'Requires phishing-resistant MFA (FIDO2 / Windows Hello for Business) for admin accounts — resistant to adversary-in-the-middle attacks.',
+    CA030: 'Enables app-enforced restrictions in SharePoint and Exchange for unmanaged devices, preventing download and printing of sensitive documents.',
+    CA033: 'Requires MFA for all Microsoft 365 admin portals (Entra, Exchange, Teams, Intune), protecting the administrative control plane.',
+    CA045: 'Limits admin sessions to one hour with mandatory re-authentication, reducing the window of exposure from a stolen admin token.',
+    IP001: 'Automatically enforces MFA for users whose account risk is High in Entra ID Identity Protection (requires Entra ID P2 licence).',
+    IP002: 'Enforces MFA for sign-ins detected as risky by Identity Protection — unusual location, anonymous IP, malware-linked IP (requires Entra ID P2).',
+    IP003: 'Forces a password change for users with High risk (leaked credentials detected) before granting access (requires Entra ID P2).',
   }
 
-  const CTRL_LABELS     = { mfa: 'Require MFA', compliantDevice: 'Require Compliant Device', domainJoinedDevice: 'Require Hybrid Azure AD Join', approvedApplication: 'Require Approved App', compliantApplication: 'Require App Protection Policy', block: 'Block Access', passwordChange: 'Require Password Change' }
-  const PLATFORM_LABELS = { android: 'Android', iOS: 'iOS', macOS: 'macOS', windows: 'Windows', windowsPhone: 'Windows Phone', linux: 'Linux', all: 'All Platforms' }
-  const CLIENT_LABELS   = { browser: 'Browser', mobileAppsAndDesktopClients: 'Mobile & Desktop', exchangeActiveSync: 'Exchange ActiveSync', other: 'Other Clients', all: 'All Clients' }
-  const RISK_LABELS     = { none: 'None', low: 'Low', medium: 'Medium', high: 'High' }
+  const CTRL_LABELS = {
+    mfa: 'Require MFA', compliantDevice: 'Require Compliant Device', domainJoinedDevice: 'Require Hybrid AD Join',
+    approvedApplication: 'Require Approved App', compliantApplication: 'Require App Protection Policy',
+    block: 'Block Access', passwordChange: 'Require Password Change',
+  }
 
   function fmtUsers(u) {
     if (!u) return null
     const incU = pv(u, 'IncludeUsers', 'includeUsers') || []
-    const incG = pv(u, 'IncludeGroups', 'includeGroups') || []
     const incR = pv(u, 'IncludeRoles', 'includeRoles') || []
+    const incG = pv(u, 'IncludeGroups', 'includeGroups') || []
     if (incU.some(x => x.toLowerCase() === 'all')) return 'All Users'
-    else if (incU.some(x => x.toLowerCase() === 'guestsorexternalusers')) return 'Guests & External Users'
-    const parts = [...(incR.length ? [`${incR.length} admin role(s)`] : []), ...(incG.length ? [`${incG.length} group(s)`] : []), ...(incU.length ? [`${incU.length} user(s)`] : [])]
+    if (incU.some(x => x.toLowerCase() === 'guestsorexternalusers')) return 'Guests & External Users'
+    const parts = [
+      ...(incR.length ? [`${incR.length} admin role(s)`] : []),
+      ...(incG.length ? [`${incG.length} group(s)`] : []),
+      ...(incU.length ? [`${incU.length} user(s)`] : []),
+    ]
     return parts.join(', ') || null
-  }
-
-  function fmtApps(a) {
-    if (!a) return null
-    const inc = pv(a, 'IncludeApplications', 'includeApplications') || []
-    const exc = pv(a, 'ExcludeApplications', 'excludeApplications') || []
-    if (inc.some(x => x.toLowerCase() === 'all')) return exc.length ? `All Applications (${exc.length} excluded)` : 'All Applications'
-    if (inc.some(x => x === 'Office365')) return 'Microsoft 365 Apps'
-    if (inc.length === 1) return '1 specific application'
-    if (inc.length > 1) return `${inc.length} specific applications`
-    return null
-  }
-
-  function fmtPlatforms(p) {
-    if (!p) return null
-    const inc = pv(p, 'IncludePlatforms', 'includePlatforms') || []
-    if (!inc.length) return null
-    if (inc.some(x => x.toLowerCase() === 'all')) return 'All Platforms'
-    return inc.map(x => PLATFORM_LABELS[x] || x).join(', ')
-  }
-
-  function fmtLocations(l) {
-    if (!l) return null
-    const inc = pv(l, 'IncludeLocations', 'includeLocations') || []
-    if (!inc.length) return null
-    if (inc.includes('All')) return 'All Locations'
-    if (inc.includes('AllTrusted')) return 'All Trusted Locations'
-    return `${inc.length} specific location(s)`
   }
 
   function fmtGrant(g) {
     if (!g) return null
     const controls = (pv(g, 'BuiltInControls', 'builtInControls') || []).map(c => CTRL_LABELS[c] || c)
-    const strength = pv(g, 'AuthenticationStrength', 'authenticationStrength')
-    if (strength) controls.push('Authentication Strength (phishing-resistant)')
-    if (!controls.length) return null
+    if (pv(g, 'AuthenticationStrength', 'authenticationStrength')) controls.push('Phishing-Resistant MFA')
     const op = (pv(g, 'Operator', 'operator') || 'OR').toUpperCase()
-    return controls.join(` ${op} `)
+    return controls.join(` ${op} `) || null
   }
 
-  function fmtSession(s) {
-    if (!s) return null
-    const parts = []
-    const sf = pv(s, 'SignInFrequency', 'signInFrequency')
-    if (sf && (sf.isEnabled || sf.IsEnabled)) {
-      const val = sf.value ?? sf.Value, type = sf.type || sf.Type
-      parts.push(val && type ? `Sign-in frequency: every ${val} ${type}` : 'Sign-in frequency enforced')
-    }
-    const pb = pv(s, 'PersistentBrowser', 'persistentBrowser')
-    if (pb && (pb.isEnabled || pb.IsEnabled)) parts.push(`Persistent browser: ${pb.mode || pb.Mode || 'configured'}`)
-    const ar = pv(s, 'ApplicationEnforcedRestrictions', 'applicationEnforcedRestrictions')
-    if (ar && (ar.isEnabled || ar.IsEnabled)) parts.push('App-enforced restrictions enabled')
-    return parts.length ? parts.join('; ') : null
-  }
-
-  function fmtClientApps(types) {
-    if (!types?.length) return null
-    return types.map(t => CLIENT_LABELS[t] || t).join(', ')
-  }
-
-  function fmtRisk(levels) {
-    if (!levels?.length) return null
-    return levels.map(l => RISK_LABELS[l] || l).join(', ')
-  }
-
-  function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' }
-
-  function detailRow(label, value) {
-    if (!value) return ''
-    return `<tr>
-      <td style="padding:4px 12px 4px 0;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#9ca3af;white-space:nowrap;vertical-align:top">${esc(label)}</td>
-      <td style="padding:4px 0;font-size:11px;color:#1f2937;line-height:1.5">${esc(value)}</td>
-    </tr>`
-  }
-
-  function policyCard(p) {
-    const state  = stateOf(p)
-    const colors = stateColors(state)
-    const name   = esc(pv(p, 'DisplayName', 'displayName') || 'Unnamed Policy')
-    const id     = esc(pv(p, 'Id', 'id') || '')
-    const cond   = pv(p, 'Conditions', 'conditions') || {}
-
-    const users      = fmtUsers(pv(cond, 'Users', 'users'))
-    const apps       = fmtApps(pv(cond, 'Applications', 'applications'))
-    const platforms  = fmtPlatforms(pv(cond, 'Platforms', 'platforms'))
-    const locations  = fmtLocations(pv(cond, 'Locations', 'locations'))
-    const clientApps = fmtClientApps(pv(cond, 'ClientAppTypes', 'clientAppTypes'))
-    const signRisk   = fmtRisk(pv(cond, 'SignInRiskLevels', 'signInRiskLevels'))
-    const userRisk   = fmtRisk(pv(cond, 'UserRiskLevels', 'userRiskLevels'))
-    const grant      = fmtGrant(pv(p, 'GrantControls', 'grantControls'))
-    const session    = fmtSession(pv(p, 'SessionControls', 'sessionControls'))
-    const created    = fmtDate(pv(p, 'CreatedDateTime', 'createdDateTime'))
-    const modified   = fmtDate(pv(p, 'ModifiedDateTime', 'modifiedDateTime'))
-    const hasConditions = users || apps || platforms || locations || clientApps || signRisk || userRisk
-    const hasControls   = grant || session
-    const subHdr = `font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.8px;color:#1a2d4a;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #f3f4f6`
-
-    return `<div style="margin-bottom:14px;border:1px solid #e5e7eb;border-left:5px solid ${colors.border};border-radius:8px;background:#fff;overflow:hidden">
-      <table style="width:100%;border-collapse:collapse">
-        <tr>
-          <td style="padding:12px 16px;border-bottom:1px solid #f3f4f6">
-            <div style="font-size:13px;font-weight:700;color:#111827">${name}</div>
-            <div style="font-size:9px;color:#d1d5db;font-family:'Courier New',monospace;margin-top:3px">${id}</div>
-          </td>
-          <td style="padding:12px 16px;text-align:right;vertical-align:middle;border-bottom:1px solid #f3f4f6;white-space:nowrap">
-            <span style="display:inline-block;padding:4px 10px;border-radius:9999px;font-size:10px;font-weight:700;background:${colors.bg};color:${colors.text}">${stateLabel(state)}</span>
-          </td>
-        </tr>
-      </table>
-      <table style="width:100%;border-collapse:collapse">
-        <tr>
-          <td style="padding:10px 16px;vertical-align:top">
-            ${hasConditions ? `<div style="${subHdr}">Scope &amp; Conditions</div>
-            <table style="width:100%;border-collapse:collapse">
-              ${detailRow('Users', users)}
-              ${detailRow('Applications', apps)}
-              ${detailRow('Platforms', platforms)}
-              ${detailRow('Locations', locations)}
-              ${detailRow('Client Apps', clientApps)}
-              ${detailRow('Sign-in Risk', signRisk)}
-              ${detailRow('User Risk', userRisk)}
-            </table>` : ''}
-          </td>
-          <td style="padding:10px 16px;vertical-align:top">
-            ${hasControls ? `<div style="${subHdr}">Access Controls</div>
-            <table style="width:100%;border-collapse:collapse">
-              ${detailRow('Grant', grant)}
-              ${detailRow('Session', session)}
-            </table>
-            <div style="margin-top:12px"></div>` : ''}
-            <div style="${subHdr}">Timeline</div>
-            <table style="width:100%;border-collapse:collapse">
-              ${detailRow('Created', created)}
-              ${detailRow('Modified', modified)}
-            </table>
-          </td>
-        </tr>
-      </table>
-    </div>`
-  }
-
-  function section(label, sectionPolicies, colorHex) {
-    if (!sectionPolicies.length) return ''
-    return `<div style="margin-bottom:24px">
-      <div style="padding-bottom:8px;border-bottom:2px solid #f3f4f6;margin-bottom:12px">
-        <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${colorHex};margin-right:8px;vertical-align:middle"></span>
-        <span style="font-size:12px;font-weight:700;color:#1a2d4a;vertical-align:middle">${esc(label)}</span>
-        <span style="font-size:11px;color:#9ca3af;margin-left:6px;vertical-align:middle">(${sectionPolicies.length})</span>
-      </div>
-      ${sectionPolicies.map(policyCard).join('')}
-    </div>`
-  }
-
+  // ── Data ────────────────────────────────────────────────────────────────────
   const enabled    = policies.filter(p => stateOf(p) === 'enabled')
   const reportOnly = policies.filter(p => stateOf(p) === 'enabledForReportingButNotEnforced')
   const disabled   = policies.filter(p => stateOf(p) === 'disabled')
 
-  const overviewRows = policies.map((p, i) => {
+  const STATE_COLOR = {
+    enabled:                           { fg: '#15803d', bg: '#dcfce7' },
+    enabledForReportingButNotEnforced: { fg: '#b45309', bg: '#fef3c7' },
+    disabled:                          { fg: '#6b7280', bg: '#f3f4f6' },
+  }
+  const SEV_COLOR = { critical: '#dc2626', high: '#ea580c', medium: '#ca8a04', low: '#16a34a', info: '#0369a1' }
+  const SEV_BG    = { critical: '#fef2f2', high: '#fff7ed', medium: '#fffbeb', low: '#f0fdf4', info: '#f0f9ff' }
+  const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3, info: 4 }
+
+  // ── Policy inventory table rows ─────────────────────────────────────────────
+  const inventoryRows = policies.map((p, i) => {
     const state  = stateOf(p)
-    const colors = stateColors(state)
-    const name   = esc(pv(p, 'DisplayName', 'displayName') || 'Unnamed')
-    const users  = esc(fmtUsers(pv(pv(p, 'Conditions', 'conditions'), 'Users', 'users')) || '—')
-    const grant  = esc(fmtGrant(pv(p, 'GrantControls', 'grantControls')) || '—')
-    const bg = i % 2 === 0 ? '#fff' : '#f9fafb'
+    const sc     = STATE_COLOR[state] || STATE_COLOR.disabled
+    const bg     = i % 2 === 0 ? '#ffffff' : '#f8fafc'
     return `<tr style="background:${bg}">
-      <td style="padding:7px 10px;font-size:11px;font-weight:600;color:#111827;border-bottom:1px solid #f3f4f6;border-left:3px solid ${colors.border}">${name}</td>
-      <td style="padding:7px 10px;border-bottom:1px solid #f3f4f6;white-space:nowrap">
-        <span style="display:inline-block;padding:3px 8px;border-radius:9999px;font-size:9.5px;font-weight:700;background:${colors.bg};color:${colors.text}">${stateLabel(state)}</span>
+      <td style="padding:7px 12px;font-size:10pt;font-weight:600;color:#111827;border-bottom:1px solid #e5e7eb">${esc(pv(p, 'DisplayName', 'displayName') || '')}</td>
+      <td style="padding:7px 12px;border-bottom:1px solid #e5e7eb;white-space:nowrap">
+        <span style="background:${sc.bg};color:${sc.fg};padding:2px 8px;font-size:9pt;font-weight:700">${stateLabel(state)}</span>
       </td>
-      <td style="padding:7px 10px;font-size:11px;color:#374151;border-bottom:1px solid #f3f4f6">${users}</td>
-      <td style="padding:7px 10px;font-size:11px;color:#374151;border-bottom:1px solid #f3f4f6">${grant}</td>
+      <td style="padding:7px 12px;font-size:10pt;color:#374151;border-bottom:1px solid #e5e7eb">${esc(fmtUsers(pv(pv(p, 'Conditions', 'conditions'), 'Users', 'users')) || '—')}</td>
+      <td style="padding:7px 12px;font-size:10pt;color:#374151;border-bottom:1px solid #e5e7eb">${esc(fmtGrant(pv(p, 'GrantControls', 'grantControls')) || '—')}</td>
     </tr>`
   }).join('')
 
-  function docxRecSection(recs) {
-    if (!recs.length) return ''
-    const cards = recs.map(r => {
-      const pct = r.totalCaCount > 0 ? Math.round((r.presentCount / r.totalCaCount) * 100) : 100
-      const pctColor = pct === 100 ? '#16a34a' : pct >= 70 ? '#d97706' : '#dc2626'
-      const missingRows = r.missingItems.map(item => {
-        const sc = SEV[item.severity] || SEV.info
-        return `<tr>
-          <td style="padding:4px 8px;font-size:10px;font-family:'Courier New',monospace;color:#9ca3af;border-bottom:1px solid #f9fafb">${esc(item.id)}</td>
-          <td style="padding:4px 8px;font-size:11px;color:#374151;border-bottom:1px solid #f9fafb">${esc(item.name)}</td>
-          <td style="padding:4px 8px;border-bottom:1px solid #f9fafb;white-space:nowrap">
-            <span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700;background:${sc.bg};color:${sc.text}">${esc(item.severity)}</span>
-          </td>
-        </tr>`
-      }).join('')
-      const body = r.missingItems.length === 0
-        ? `<p style="color:#16a34a;font-size:11px;font-weight:600;margin-top:4px">&#10003; All baseline CA policies detected on this tenant</p>`
-        : `<table style="width:100%;border-collapse:collapse;margin-top:8px">
-            <thead><tr style="background:#f9fafb">
-              <th style="padding:4px 8px;text-align:left;font-size:9px;color:#9ca3af;border-bottom:1px solid #f3f4f6">ID</th>
-              <th style="padding:4px 8px;text-align:left;font-size:9px;color:#9ca3af;border-bottom:1px solid #f3f4f6">Recommended Policy</th>
-              <th style="padding:4px 8px;text-align:left;font-size:9px;color:#9ca3af;border-bottom:1px solid #f3f4f6">Severity</th>
-            </tr></thead>
-            <tbody>${missingRows}</tbody>
-          </table>
-          ${r.unverifiableCount > 0 ? `<p style="margin-top:6px;font-size:10px;color:#9ca3af">+ ${r.unverifiableCount} Identity Protection ${r.unverifiableCount === 1 ? 'policy' : 'policies'} — requires separate Entra ID review</p>` : ''}`
-      return `<div style="margin-bottom:14px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:14px 16px">
-        <table style="width:100%;border-collapse:collapse;margin-bottom:8px">
-          <tr>
-            <td style="vertical-align:top">
-              <div style="font-size:13px;font-weight:700;color:#111827">${esc(r.name)}</div>
-              <div style="font-size:11px;color:#6b7280;margin-top:2px">${esc(r.description || '')}</div>
-            </td>
-            <td style="text-align:right;vertical-align:top;white-space:nowrap">
-              <div style="font-size:24px;font-weight:700;color:${pctColor}">${pct}%</div>
-              <div style="font-size:10px;color:#9ca3af">${r.presentCount}/${r.totalCaCount} CA policies found</div>
-            </td>
-          </tr>
-        </table>
-        ${body}
-      </div>`
-    }).join('')
-    return `<div style="margin-top:24px;border-top:2px solid #f3f4f6;padding-top:20px">
-      <div style="font-size:16px;font-weight:700;color:#1a2d4a;margin-bottom:4px">Baseline Coverage &amp; Recommendations</div>
-      <div style="font-size:11px;color:#9ca3af;margin-bottom:16px">Comparing tenant policies against Microsoft recommended security baselines &mdash; ${esc(date)}</div>
-      <div style="border:1px solid #fde68a;border-radius:8px;padding:10px 14px;background:#fffbeb;margin-bottom:16px">
-        <p style="font-size:11px;color:#92400e;margin:0"><strong>Note:</strong> Policies are matched by ID in the display name (e.g. "CA001: Require MFA") or by their configuration intent — so any policy with the right settings is detected regardless of its name. Identity Protection policies (IP*) require a separate Entra ID review.</p>
-      </div>
-      ${cards}
-    </div>`
-  }
+  // ── Baseline compliance summary rows ────────────────────────────────────────
+  const baselineSummaryRows = recommendations.map((r, i) => {
+    const pct      = r.totalCaCount > 0 ? Math.round((r.presentCount / r.totalCaCount) * 100) : 100
+    const pctColor = pct === 100 ? '#15803d' : pct >= 70 ? '#b45309' : '#dc2626'
+    const bg       = i % 2 === 0 ? '#ffffff' : '#f8fafc'
+    const status   = r.missingItems.length === 0
+      ? `<span style="color:#15803d;font-weight:700">&#10003; Compliant</span>`
+      : `<span style="color:#dc2626;font-weight:700">${r.missingItems.length} gap${r.missingItems.length > 1 ? 's' : ''} identified</span>`
+    return `<tr style="background:${bg}">
+      <td style="padding:8px 12px;font-size:10pt;font-weight:700;color:#111827;border-bottom:1px solid #e5e7eb">${esc(r.name)}</td>
+      <td style="padding:8px 12px;font-size:16pt;font-weight:700;color:${pctColor};border-bottom:1px solid #e5e7eb;text-align:center">${pct}%</td>
+      <td style="padding:8px 12px;font-size:10pt;color:#374151;border-bottom:1px solid #e5e7eb;text-align:center">${r.presentCount} / ${r.totalCaCount}</td>
+      <td style="padding:8px 12px;font-size:10pt;border-bottom:1px solid #e5e7eb">${status}</td>
+    </tr>`
+  }).join('')
 
+  // ── Per-baseline gap detail sections ────────────────────────────────────────
+  const gapSections = recommendations.filter(r => r.missingItems.length > 0).map(r => {
+    const pct      = r.totalCaCount > 0 ? Math.round((r.presentCount / r.totalCaCount) * 100) : 100
+    const pctColor = pct >= 70 ? '#b45309' : '#dc2626'
+    const sortedMissing = [...r.missingItems].sort((a, b) => (SEV_ORDER[a.severity] ?? 5) - (SEV_ORDER[b.severity] ?? 5))
+    const rows = sortedMissing.map((item, i) => {
+      const bg = i % 2 === 0 ? '#ffffff' : '#f8fafc'
+      return `<tr style="background:${bg}">
+        <td style="padding:7px 10px;font-family:'Courier New',monospace;font-size:9pt;color:#6b7280;white-space:nowrap;border-bottom:1px solid #e5e7eb">${esc(item.id)}</td>
+        <td style="padding:7px 10px;font-size:10pt;font-weight:600;color:#111827;border-bottom:1px solid #e5e7eb">${esc(item.name)}</td>
+        <td style="padding:7px 10px;white-space:nowrap;border-bottom:1px solid #e5e7eb">
+          <span style="background:${SEV_BG[item.severity]||'#f3f4f6'};color:${SEV_COLOR[item.severity]||'#6b7280'};padding:2px 8px;font-size:9pt;font-weight:700">${item.severity.charAt(0).toUpperCase()+item.severity.slice(1)}</span>
+        </td>
+        <td style="padding:7px 10px;font-size:9pt;color:#6b7280;border-bottom:1px solid #e5e7eb">${esc(POLICY_DESC[item.id] || '')}</td>
+      </tr>`
+    }).join('')
+    return `<h3 style="font-size:12pt;font-weight:700;color:#1a2d4a;margin-top:20px;margin-bottom:2px">${esc(r.name)} — <span style="color:${pctColor}">${pct}% compliant</span></h3>
+<p style="font-size:10pt;color:#6b7280;margin-bottom:8px">${esc(r.description || '')}</p>
+<table style="width:100%;border-collapse:collapse;margin-bottom:12px">
+  <thead>
+    <tr>
+      <th style="background:#1a2d4a;color:#ffffff;padding:7px 10px;text-align:left;font-size:9pt;font-weight:700">Policy ID</th>
+      <th style="background:#1a2d4a;color:#ffffff;padding:7px 10px;text-align:left;font-size:9pt;font-weight:700">Recommended Policy</th>
+      <th style="background:#1a2d4a;color:#ffffff;padding:7px 10px;text-align:left;font-size:9pt;font-weight:700">Priority</th>
+      <th style="background:#1a2d4a;color:#ffffff;padding:7px 10px;text-align:left;font-size:9pt;font-weight:700">What it protects against</th>
+    </tr>
+  </thead>
+  <tbody>${rows}</tbody>
+</table>
+${r.unverifiableCount > 0 ? `<p style="font-size:9pt;color:#9ca3af;font-style:italic;margin-bottom:16px">${r.unverifiableCount} Identity Protection ${r.unverifiableCount === 1 ? 'policy' : 'policies'} in this baseline require a separate Entra ID Identity Protection review and an Entra ID P2 licence.</p>` : ''}`
+  }).join('')
+
+  // ── Consolidated action plan (all unique missing items, sorted by severity) ──
+  const seen = new Set()
+  const allMissing = []
+  for (const r of recommendations) {
+    for (const item of r.missingItems) {
+      if (!seen.has(item.id)) { seen.add(item.id); allMissing.push(item) }
+    }
+  }
+  allMissing.sort((a, b) => (SEV_ORDER[a.severity] ?? 5) - (SEV_ORDER[b.severity] ?? 5))
+
+  const actionRows = allMissing.map((item, i) => {
+    const bg = i % 2 === 0 ? '#ffffff' : '#f8fafc'
+    return `<tr style="background:${bg}">
+      <td style="padding:7px 12px;font-size:10pt;font-weight:700;color:#1a2d4a;text-align:center;border-bottom:1px solid #e5e7eb">${i + 1}</td>
+      <td style="padding:7px 12px;font-family:'Courier New',monospace;font-size:9pt;color:#6b7280;white-space:nowrap;border-bottom:1px solid #e5e7eb">${esc(item.id)}</td>
+      <td style="padding:7px 12px;font-size:10pt;font-weight:600;color:#111827;border-bottom:1px solid #e5e7eb">${esc(item.name)}</td>
+      <td style="padding:7px 12px;white-space:nowrap;border-bottom:1px solid #e5e7eb">
+        <span style="background:${SEV_BG[item.severity]||'#f3f4f6'};color:${SEV_COLOR[item.severity]||'#6b7280'};padding:2px 8px;font-size:9pt;font-weight:700">${item.severity.charAt(0).toUpperCase()+item.severity.slice(1)}</span>
+      </td>
+    </tr>`
+  }).join('')
+
+  // ── HTML ────────────────────────────────────────────────────────────────────
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 12px; line-height: 1.5; color: #1f2937; background: #fff; }
-table { width: 100%; border-collapse: collapse; }
-p { margin: 0; }
+* { box-sizing: border-box; }
+body { font-family: 'Calibri', 'Segoe UI', sans-serif; font-size: 11pt; color: #1f2937; line-height: 1.6; background: #ffffff; }
+h1 { font-size: 26pt; font-weight: 300; color: #1a2d4a; margin: 0 0 4px 0; }
+h2 { font-size: 14pt; font-weight: 700; color: #1a2d4a; margin: 32px 0 10px 0; padding-bottom: 6px; border-bottom: 2px solid #E8A830; }
+h3 { font-size: 12pt; font-weight: 700; color: #1a2d4a; margin: 20px 0 6px 0; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+th { padding: 8px 12px; text-align: left; font-size: 10pt; font-weight: 700; }
+td { padding: 7px 12px; }
+p { margin: 0 0 8px 0; }
+strong { color: #1a2d4a; }
 </style>
 </head>
 <body>
 
-<!-- Branded header using tables (flex/grid not supported in DOCX) -->
-<table style="width:100%;border-collapse:collapse;margin-bottom:20px">
-  <tr><td colspan="2" style="background:#E8A830;height:5px;padding:0;font-size:1px">&nbsp;</td></tr>
-  <tr>
-    <td style="background:#1a2d4a;padding:24px 32px 28px;vertical-align:bottom">
-      <div style="font-size:32px;font-weight:200;color:#ffffff;letter-spacing:-1.5px;line-height:1">affinity</div>
-      <div style="font-size:11px;color:#E8A830;margin-top:6px;letter-spacing:0.5px">Technology. Together.</div>
-    </td>
-    <td style="background:#1a2d4a;padding:24px 32px 28px;text-align:right;vertical-align:bottom">
-      <div style="font-size:9px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:#5a7a9a;margin-bottom:8px">M365 Security Policy Report</div>
-      <div style="font-size:22px;font-weight:600;color:#ffffff;line-height:1.2;margin-bottom:5px">${esc(orgName || 'Tenant')}</div>
-      <div style="font-size:12px;color:#7a9ab5">Generated ${esc(date)}</div>
-    </td>
-  </tr>
-</table>
+<!-- ═══ COVER ════════════════════════════════════════════════════════════════ -->
+<div style="border-top:6px solid #E8A830;padding-top:40px;margin-bottom:48px">
 
-<!-- Stats -->
-<table style="width:100%;border-collapse:collapse;margin-bottom:20px">
-  <tr>
-    ${[
-      { label: 'Total Policies', value: policies.length, color: '#1a2d4a' },
-      { label: 'Enabled',        value: enabled.length,  color: '#16a34a' },
-      { label: 'Report Only',    value: reportOnly.length, color: '#d97706' },
-      { label: 'Disabled',       value: disabled.length,  color: '#9ca3af' },
-    ].map(s => `<td style="background:#f9fafb;border:1px solid #e5e7eb;border-top:3px solid ${s.color};padding:16px 10px;text-align:center">
-      <div style="font-size:30px;font-weight:700;color:${s.color};line-height:1">${s.value}</div>
-      <div style="font-size:10px;font-weight:700;color:#9ca3af;margin-top:8px;text-transform:uppercase;letter-spacing:0.5px">${s.label}</div>
-    </td>`).join('')}
-  </tr>
-</table>
+  <div style="font-size:38pt;font-weight:200;color:#1a2d4a;letter-spacing:-2px;line-height:1">affinity</div>
+  <div style="font-size:11pt;color:#E8A830;margin-top:6px;letter-spacing:1px">Technology. Together.</div>
 
-<!-- About -->
-<div style="border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px;background:#f9fafb;margin-bottom:20px">
-  <div style="font-size:13px;font-weight:700;color:#1a2d4a;margin-bottom:8px">About This Report</div>
-  <p style="font-size:12px;color:#374151;line-height:1.65;margin-bottom:8px">This report provides a complete snapshot of the Microsoft 365 Conditional Access policies configured in the <strong>${esc(orgName || 'tenant')}</strong> environment, generated on ${esc(date)}.</p>
-  <p style="font-size:12px;color:#374151;line-height:1.65">Each policy shows its full configuration including users, applications, device platforms, risk levels, and access controls such as MFA requirements.</p>
+  <div style="margin-top:52px">
+    <div style="font-size:9pt;font-weight:700;color:#9ca3af;letter-spacing:2px">MICROSOFT 365 SECURITY POLICY REPORT</div>
+    <div style="font-size:28pt;font-weight:700;color:#1a2d4a;line-height:1.2;margin-top:8px">${esc(orgName || 'Tenant')}</div>
+    <div style="font-size:11pt;color:#6b7280;margin-top:8px">${esc(date)}</div>
+  </div>
+
+  <table style="width:100%;border-collapse:collapse;margin-top:52px">
+    <tr>
+      <td style="background:#E8A830;padding:0 0 0 0;font-size:1pt">&nbsp;</td>
+    </tr>
+    <tr>
+      <td style="padding:16px 20px;background:#f8fafc;font-size:10pt;color:#374151">
+        <strong>Confidential</strong> — Prepared by Affinity Technology for <strong>${esc(orgName || 'your organisation')}</strong>.
+        This report provides a full analysis of your Microsoft 365 Conditional Access security configuration, identifies gaps against
+        Microsoft&rsquo;s recommended security baselines, and sets out a prioritised action plan.
+      </td>
+    </tr>
+  </table>
+
 </div>
 
-<!-- Overview -->
-<div style="font-size:12px;font-weight:700;color:#1a2d4a;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Policy Overview</div>
-<table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+<!-- ═══ EXECUTIVE SUMMARY ═══════════════════════════════════════════════════ -->
+<h2>Executive Summary</h2>
+<p>This report documents the Conditional Access policy configuration for <strong>${esc(orgName || 'your organisation')}</strong>
+as of <strong>${esc(date)}</strong>. Conditional Access is the enforcement layer in Microsoft Entra ID that controls who can
+access cloud applications, from which devices and locations, and under what conditions.</p>
+<p>The assessment reviewed <strong>${policies.length} Conditional Access ${policies.length === 1 ? 'policy' : 'policies'}</strong>
+and compared the configuration against Microsoft&rsquo;s recommended security baselines. The table below summarises the current posture.</p>
+
+<table style="width:100%;border-collapse:collapse;margin-bottom:20px">
   <thead>
-    <tr style="background:#f3f4f6">
-      <th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;border-bottom:2px solid #e5e7eb">Policy Name</th>
-      <th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;border-bottom:2px solid #e5e7eb">Status</th>
-      <th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;border-bottom:2px solid #e5e7eb">Users</th>
-      <th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;border-bottom:2px solid #e5e7eb">Grant Controls</th>
+    <tr>
+      <th style="background:#1a2d4a;color:#ffffff;padding:10px 16px;text-align:center">Total Policies</th>
+      <th style="background:#1a2d4a;color:#ffffff;padding:10px 16px;text-align:center">Active (Enforced)</th>
+      <th style="background:#1a2d4a;color:#ffffff;padding:10px 16px;text-align:center">Audit Mode Only</th>
+      <th style="background:#1a2d4a;color:#ffffff;padding:10px 16px;text-align:center">Disabled</th>
     </tr>
   </thead>
-  <tbody>${overviewRows}</tbody>
+  <tbody>
+    <tr>
+      <td style="padding:14px 16px;font-size:22pt;font-weight:700;color:#1a2d4a;text-align:center;border-bottom:1px solid #e5e7eb">${policies.length}</td>
+      <td style="padding:14px 16px;font-size:22pt;font-weight:700;color:#15803d;text-align:center;border-bottom:1px solid #e5e7eb">${enabled.length}</td>
+      <td style="padding:14px 16px;font-size:22pt;font-weight:700;color:#b45309;text-align:center;border-bottom:1px solid #e5e7eb">${reportOnly.length}</td>
+      <td style="padding:14px 16px;font-size:22pt;font-weight:700;color:#9ca3af;text-align:center;border-bottom:1px solid #e5e7eb">${disabled.length}</td>
+    </tr>
+  </tbody>
 </table>
 
-<!-- Full policy details -->
-<div style="font-size:16px;font-weight:700;color:#1a2d4a;margin-bottom:4px">Conditional Access — Full Policy Details</div>
-<div style="font-size:11px;color:#9ca3af;margin-bottom:16px">${policies.length} ${policies.length === 1 ? 'policy' : 'policies'} &mdash; ${esc(orgName || 'Tenant')} &mdash; ${esc(date)}</div>
-<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px;background:#f9fafb;margin-bottom:20px">
-  <p style="font-size:12px;color:#374151;line-height:1.6">Each policy below shows the full configuration retrieved directly from Microsoft Entra ID. <strong>Scope &amp; Conditions</strong> describes who and what the policy targets. <strong>Access Controls</strong> describes the action taken — such as requiring MFA or blocking access.</p>
-</div>
+${recommendations.length > 0 ? `
+<!-- ═══ BASELINE COMPLIANCE ══════════════════════════════════════════════════ -->
+<h2>Baseline Compliance Overview</h2>
+<p>The table below shows how the current Conditional Access configuration compares against Microsoft&rsquo;s recommended security baselines.
+Each baseline represents a curated set of policies addressing a specific security scenario.</p>
 
-${section('Enabled', enabled, '#22c55e')}
-${section('Report Only', reportOnly, '#f59e0b')}
-${section('Disabled', disabled, '#d1d5db')}
+<table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+  <thead>
+    <tr>
+      <th style="background:#1a2d4a;color:#ffffff;padding:8px 12px">Baseline</th>
+      <th style="background:#1a2d4a;color:#ffffff;padding:8px 12px;text-align:center">Score</th>
+      <th style="background:#1a2d4a;color:#ffffff;padding:8px 12px;text-align:center">Policies Detected</th>
+      <th style="background:#1a2d4a;color:#ffffff;padding:8px 12px">Finding</th>
+    </tr>
+  </thead>
+  <tbody>${baselineSummaryRows}</tbody>
+</table>
 
-${recommendations.length > 0 ? docxRecSection(recommendations) : ''}
+<!-- ═══ GAP ANALYSIS ═════════════════════════════════════════════════════════ -->
+<h2>Gap Analysis &amp; Recommendations</h2>
+<p>The following section details each missing policy, its business risk, and the specific protection it provides. These findings form the
+basis of the recommended action plan. Policies are matched by ID in their display name <em>or</em> by their configuration, so
+any existing policy with the correct settings is detected regardless of its name.</p>
 
-<div style="margin-top:20px;padding:10px 14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px">
-  <p style="font-size:10px;color:#9ca3af">Generated by M365 Security Policy Manager &middot; Affinity Technology &middot; ${esc(date)} &middot; Confidential</p>
-</div>
+${gapSections || '<p style="color:#15803d;font-weight:700">&#10003; No gaps identified — all selected baseline policies are present.</p>'}
+
+${allMissing.length > 0 ? `
+<!-- ═══ ACTION PLAN ══════════════════════════════════════════════════════════ -->
+<h2>Recommended Action Plan</h2>
+<p>The table below consolidates all recommended policies across the selected baselines, ordered by priority. Affinity Technology
+can assist with the design, testing (Report Only mode), and phased enforcement of these policies in your environment.</p>
+
+<table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+  <thead>
+    <tr>
+      <th style="background:#1a2d4a;color:#ffffff;padding:8px 12px;text-align:center">#</th>
+      <th style="background:#1a2d4a;color:#ffffff;padding:8px 12px">Policy ID</th>
+      <th style="background:#1a2d4a;color:#ffffff;padding:8px 12px">Policy to Implement</th>
+      <th style="background:#1a2d4a;color:#ffffff;padding:8px 12px">Priority</th>
+    </tr>
+  </thead>
+  <tbody>${actionRows}</tbody>
+</table>
+
+<table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+  <tr>
+    <td style="padding:14px 18px;background:#f8fafc;border-left:4px solid #E8A830;font-size:10pt;color:#374151">
+      <strong>Next steps:</strong> Affinity Technology recommends deploying new policies in <em>Report Only</em> mode first to assess
+      impact before switching to enforcement. This approach avoids accidental lockouts and provides a clear baseline for review.
+      Contact your Affinity account manager to discuss a phased implementation programme.
+    </td>
+  </tr>
+</table>
+` : ''}
+` : ''}
+
+<!-- ═══ POLICY INVENTORY ══════════════════════════════════════════════════════ -->
+<h2>Conditional Access Policy Inventory</h2>
+<p>The following table lists all ${policies.length} Conditional Access ${policies.length === 1 ? 'policy' : 'policies'} currently configured in your tenant.</p>
+
+<table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+  <thead>
+    <tr>
+      <th style="background:#1a2d4a;color:#ffffff;padding:8px 12px">Policy Name</th>
+      <th style="background:#1a2d4a;color:#ffffff;padding:8px 12px">Status</th>
+      <th style="background:#1a2d4a;color:#ffffff;padding:8px 12px">Applies To</th>
+      <th style="background:#1a2d4a;color:#ffffff;padding:8px 12px">Grant Controls</th>
+    </tr>
+  </thead>
+  <tbody>${inventoryRows}</tbody>
+</table>
+
+<!-- ═══ FOOTER ═══════════════════════════════════════════════════════════════ -->
+<table style="width:100%;border-collapse:collapse;margin-top:40px">
+  <tr>
+    <td style="border-top:2px solid #E8A830;padding-top:12px">
+      <p style="font-size:9pt;color:#9ca3af;margin:0">Generated by M365 Security Policy Manager &middot; Affinity Technology &middot; ${esc(date)} &middot; Confidential</p>
+      <p style="font-size:9pt;color:#9ca3af;margin-top:4px">To discuss these recommendations or engage Affinity Technology to implement the identified improvements, please contact your Affinity account manager.</p>
+    </td>
+  </tr>
+</table>
 
 </body>
 </html>`
