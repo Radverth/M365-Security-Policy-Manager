@@ -21,7 +21,7 @@ function cleanForGraph(v) {
   if (v && typeof v === 'object') {
     return Object.fromEntries(
       Object.entries(v)
-        .filter(([k]) => !_STRIP_KEYS.has(k) && !k.startsWith('@'))
+        .filter(([k]) => !_STRIP_KEYS.has(k) && (k === '@odata.type' || !k.startsWith('@')))
         .map(([k, val]) => [k.charAt(0).toLowerCase() + k.slice(1), cleanForGraph(val)])
     )
   }
@@ -158,7 +158,7 @@ function PolicyEditor({ policy, onSave, onCancel, saving }) {
     if (incGroups.length) usersObj.includeGroups = incGroups
     if (incRoles.length)  usersObj.includeRoles  = incRoles
     if (excRoles.length)  usersObj.excludeRoles  = excRoles
-    if (incGuests)        usersObj.includeGuestsOrExternalUsers = incGuests
+    if (incGuests)        usersObj.includeGuestsOrExternalUsers = cleanForGraph(incGuests)
     if (excGrpIds.length)  usersObj.excludeGroups = excGrpIds
     if (excUserIds.length) usersObj.excludeUsers  = excUserIds
 
@@ -281,142 +281,9 @@ function PolicyEditor({ policy, onSave, onCancel, saving }) {
   )
 }
 
-// ── Auth mode selector ────────────────────────────────────────────────────────
-function AuthModeSelector({ mode, onChange }) {
-  const modes = [
-    { id: 'itglue',      label: 'IT Glue',       icon: '🔗', desc: 'Resolve org credentials from IT Glue' },
-    { id: 'interactive', label: 'WAM / Browser',  icon: '🌐', desc: 'Sign in interactively via browser or device code' },
-  ]
-  return (
-    <div className="grid grid-cols-2 gap-3 mb-4">
-      {modes.map((m) => (
-        <button
-          key={m.id}
-          onClick={() => onChange(m.id)}
-          className={[
-            'relative flex items-center gap-3 px-4 py-3 rounded-lg border-2 text-left transition-all',
-            mode === m.id ? 'border-navy bg-navy-50' : 'border-gray-200 hover:border-gray-300 bg-white',
-          ].join(' ')}
-        >
-          <span className="text-lg leading-none">{m.icon}</span>
-          <div>
-            <p className={`text-sm font-semibold ${mode === m.id ? 'text-navy' : 'text-gray-700'}`}>{m.label}</p>
-            <p className="text-xs text-gray-500">{m.desc}</p>
-          </div>
-          {mode === m.id && <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-navy" />}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-// ── IT Glue connection form ───────────────────────────────────────────────────
-function ItGlueConnect({ credentials, setCredentials }) {
-  const { orgs, orgsLoading, loadOrgs, settings } = useStore()
-  const [selectedOrg, setSelectedOrg] = useState(null)
-  const [passwords, setPasswords] = useState([])
-  const [pwLoading, setPwLoading] = useState(false)
-  const [selectedPwId, setSelectedPwId] = useState(null)
-
-  useEffect(() => {
-    if (settings.itGlueApiKey) loadOrgs()
-  }, [])
-
-  useEffect(() => {
-    if (!selectedOrg || !window.api) return
-    setPwLoading(true)
-    setCredentials(null)
-    setSelectedPwId(null)
-    window.api.itglue.getPasswords(selectedOrg.id)
-      .then((res) => setPasswords(res || []))
-      .catch(() => setPasswords([]))
-      .finally(() => setPwLoading(false))
-  }, [selectedOrg?.id])
-
-  if (!settings.itGlueApiKey) {
-    return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-        IT Glue API key not configured. Go to Settings to add your key, or use WAM / Browser mode.
-      </div>
-    )
-  }
-
-  return (
-    <div className="grid grid-cols-2 gap-4">
-      {/* Org picker */}
-      <div>
-        <p className="text-xs font-medium text-gray-600 mb-1.5">Organisation</p>
-        <div className="max-h-40 overflow-y-auto space-y-1 border border-gray-200 rounded-lg p-1">
-          {orgsLoading ? (
-            Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-9 bg-gray-100 rounded animate-pulse" />)
-          ) : orgs.length === 0 ? (
-            <p className="text-xs text-gray-400 p-3 text-center">No organisations found</p>
-          ) : orgs.map((o) => (
-            <button
-              key={o.id}
-              onClick={() => setSelectedOrg(o)}
-              className={[
-                'w-full text-left px-3 py-2 rounded text-sm transition-colors',
-                selectedOrg?.id === o.id ? 'bg-navy text-white font-medium' : 'hover:bg-gray-50 text-gray-800',
-              ].join(' ')}
-            >
-              {o.name}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Password picker */}
-      <div>
-        <p className="text-xs font-medium text-gray-600 mb-1.5">Credential</p>
-        <div className="max-h-40 overflow-y-auto space-y-1 border border-gray-200 rounded-lg p-1">
-          {!selectedOrg ? (
-            <p className="text-xs text-gray-400 p-3 text-center">Select an organisation first</p>
-          ) : pwLoading ? (
-            Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-9 bg-gray-100 rounded animate-pulse" />)
-          ) : passwords.length === 0 ? (
-            <p className="text-xs text-gray-400 p-3 text-center">No passwords found</p>
-          ) : passwords.map((pw) => (
-            <button
-              key={pw.id}
-              onClick={() => { setSelectedPwId(pw.id); setCredentials({ username: pw.username, password: pw.password }) }}
-              className={[
-                'w-full text-left px-3 py-2 rounded text-sm transition-colors',
-                selectedPwId === pw.id ? 'bg-navy text-white font-medium' : 'hover:bg-gray-50 text-gray-800',
-              ].join(' ')}
-            >
-              <p className="font-medium truncate">{pw.name}</p>
-              <p className={`text-xs truncate ${credentials?.username === pw.username ? 'text-white/70' : 'text-gray-400'}`}>{pw.username}</p>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── WAM connection form ───────────────────────────────────────────────────────
-function WamConnect() {
-  return (
-    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-2">
-      <div className="flex items-center gap-2">
-        <svg className="w-5 h-5 text-blue-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
-        </svg>
-        <p className="text-sm font-semibold text-blue-800">Interactive / WAM sign-in</p>
-      </div>
-      <p className="text-sm text-blue-700">
-        Clicking Load Policies will start a device code sign-in. A code and URL will appear in the connection output below — go to <strong>microsoft.com/devicelogin</strong> and enter the code to authenticate.
-      </p>
-    </div>
-  )
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function ManagePolicies() {
   const { addNotification, tenantSession, openConnectModal, openSwitchModal } = useStore()
-  const [authMode, setAuthMode] = useState('itglue')
-  const [credentials, setCredentials] = useState(null)
   const [connectedAs, setConnectedAs] = useState(null)
   const [policies, setPolicies] = useState([])
   const [loading, setLoading] = useState(false)
@@ -431,15 +298,6 @@ export default function ManagePolicies() {
   const [saveLoading, setSaveLoading] = useState(false)
   // Effective connection: prefer local connectedAs, fall back to global session
   const effectiveSession = connectedAs || tenantSession
-
-  const handleAuthModeChange = (mode) => {
-    setAuthMode(mode)
-    setCredentials(null)
-    setConnectedAs(null)
-    setPolicies([])
-  }
-
-  const canLoad = !!tenantSession || authMode === 'interactive' || !!(credentials?.username && credentials?.password)
 
   const handleLoad = async () => {
     if (!window.api) return
@@ -601,19 +459,13 @@ export default function ManagePolicies() {
               </Button>
             </div>
           ) : (
-            <>
-              <AuthModeSelector mode={authMode} onChange={handleAuthModeChange} />
-              {authMode === 'itglue'
-                ? <ItGlueConnect credentials={credentials} setCredentials={setCredentials} />
-                : <WamConnect />
-              }
-              <div className="flex justify-end gap-2">
-                <Button variant="ghost" onClick={openConnectModal}>Use global session</Button>
-                <Button variant="primary" onClick={handleLoad} loading={loading} disabled={!canLoad}>
-                  Load Policies
-                </Button>
+            <div className="flex items-center justify-between rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
+              <div>
+                <p className="text-sm font-medium text-blue-900">No tenant connected</p>
+                <p className="text-xs text-blue-700 mt-0.5">Use the sidebar or the button below to sign in to a tenant.</p>
               </div>
-            </>
+              <Button variant="primary" size="sm" onClick={openConnectModal}>Connect Tenant</Button>
+            </div>
           )}
           {loading && (
             <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">

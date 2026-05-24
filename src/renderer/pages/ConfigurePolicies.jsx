@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { POLICIES, CATEGORY_FIELDS, POLICY_EXTRA_FIELDS } from '../../shared/constants'
 import EntityPicker from '../components/EntityPicker'
+import useStore from '../store'
 
 // Merge category defaults + policy-specific extra fields
 function getFields(policy) {
@@ -21,6 +22,7 @@ function isDefaultValue(field, value) {
 // Single field renderer
 function FieldInput({ field, value, onChange }) {
   const cls = 'block w-full rounded border border-gray-300 px-2.5 py-1.5 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy'
+  const tenantSession = useStore(s => s.tenantSession)
 
   if (field.type === 'entity-groups' || field.type === 'entity-users') {
     return (
@@ -28,6 +30,7 @@ function FieldInput({ field, value, onChange }) {
         type={field.type === 'entity-groups' ? 'groups' : 'users'}
         selected={Array.isArray(value) ? value : []}
         onChange={onChange}
+        noSession={!tenantSession}
       />
     )
   }
