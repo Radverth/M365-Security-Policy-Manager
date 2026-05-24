@@ -13,13 +13,17 @@ function pick(obj, ...keys) {
   for (const k of keys) { if (obj[k] !== undefined) return obj[k] }
 }
 
-// Recursively convert PascalCase object keys to camelCase so Graph API accepts them
-function toCamel(v) {
-  if (Array.isArray(v)) return v.map(toCamel)
+// Recursively convert PascalCase keys to camelCase and strip PS SDK metadata
+// (AdditionalProperties, BackingStore, @-prefixed OData keys) before sending to Graph.
+const _STRIP_KEYS = new Set(['AdditionalProperties', 'BackingStore'])
+function cleanForGraph(v) {
+  if (Array.isArray(v)) return v.map(cleanForGraph)
   if (v && typeof v === 'object') {
-    return Object.fromEntries(Object.entries(v).map(([k, val]) => [
-      k.charAt(0).toLowerCase() + k.slice(1), toCamel(val)
-    ]))
+    return Object.fromEntries(
+      Object.entries(v)
+        .filter(([k]) => !_STRIP_KEYS.has(k) && !k.startsWith('@'))
+        .map(([k, val]) => [k.charAt(0).toLowerCase() + k.slice(1), cleanForGraph(val)])
+    )
   }
   return v
 }
@@ -158,14 +162,13 @@ function PolicyEditor({ policy, onSave, onCancel, saving }) {
     if (excGrpIds.length)  usersObj.excludeGroups = excGrpIds
     if (excUserIds.length) usersObj.excludeUsers  = excUserIds
 
-    // Convert the full existing conditions to camelCase and spread — Graph's PATCH
-    // replaces nested objects entirely, so we must include applications, locations,
-    // clientAppTypes etc. or they get wiped and the API returns BadRequest.
-    const existingConditions = toCamel(pick(policy, 'Conditions', 'conditions') || {})
+    // Preserve existing conditions (applications, locations etc.) — Graph requires
+    // the full conditions object on PATCH. Strip PS SDK metadata before sending.
+    const cleanedConditions = cleanForGraph(cond)
     const patch = {
       displayName: name,
       state,
-      conditions: { ...existingConditions, users: usersObj },
+      conditions: { ...cleanedConditions, users: usersObj },
     }
 
     if (!hasAuthStrength) {

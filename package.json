@@ -40,6 +40,10 @@
       {
         "from": "assets/affinity-header.png",
         "to": "assets/affinity-header.png"
+      },
+      {
+        "from": "assets/affinity_it_services_ltd_cover.jpeg",
+        "to": "assets/affinity_it_services_ltd_cover.jpeg"
       }
     ],
     "publish": [
