@@ -693,7 +693,7 @@ function ReportView({ orgName, tenantPolicies, nameMap = {}, date, selectedBasel
               </svg>
               Technical Audit Report
             </Button>
-            <span className="text-[10px] text-gray-400 pr-1">PDF &middot; for IT teams &amp; admins</span>
+            <span className="text-[10px] text-gray-400 pr-1">PDF &middot; for the technical team</span>
           </div>
           <div className="flex flex-col items-end gap-0.5">
             <Button variant="secondary" onClick={handleExportDocx} loading={savingDocx} disabled={saving}>

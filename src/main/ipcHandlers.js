@@ -472,10 +472,22 @@ ${recommendations.length > 0 ? recSection(recommendations, esc, date) : ''}
 function generateDocxHtml(orgName, policies, date, nameMap = {}, recommendations = [], amName = null, amEmail = null) {
   function esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
   const pv = (obj, ...keys) => { for (const k of keys) { if (obj?.[k] != null) return obj[k] } return null }
-  const stateOf  = p => p.State || p.state || 'unknown'
+  const stateOf   = p => p.State || p.state || 'unknown'
   const stateLabel = s => ({ enabled: 'Enabled', disabled: 'Disabled', enabledForReportingButNotEnforced: 'Report Only' }[s] || 'Unknown')
 
-  // ── Policy descriptions for the gap analysis section ────────────────────────
+  // ── Design tokens — defined first so all row builders can reference them ────
+  const NAV  = '#1a2d4a'
+  const GOLD = '#E8A830'
+  const TH   = `background:${NAV};color:#ffffff;padding:8px 10px;font-size:10pt;font-weight:700;text-align:left`
+
+  function sectionHeading(text) {
+    return `<table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin:28px 0 10px 0"><tr><td style="padding:0 0 6px 0;font-size:14pt;font-weight:700;color:${NAV};border-bottom:3px solid ${GOLD}">${text}</td></tr></table>`
+  }
+  function pageBreak() {
+    return `<p style="page-break-before:always;margin:0;font-size:1pt">&nbsp;</p>`
+  }
+
+  // ── Lookup tables ────────────────────────────────────────────────────────────
   const POLICY_DESC = {
     CA001: 'Requires all users to complete MFA on every sign-in, protecting against compromised passwords — the single most impactful control available.',
     CA002: 'Blocks legacy authentication protocols (Exchange ActiveSync, SMTP AUTH) which cannot enforce MFA and account for the majority of password-spray attacks.',
@@ -503,6 +515,15 @@ function generateDocxHtml(orgName, policies, date, nameMap = {}, recommendations
     mfa: 'Require MFA', compliantDevice: 'Require Compliant Device', domainJoinedDevice: 'Require Hybrid AD Join',
     approvedApplication: 'Require Approved App', compliantApplication: 'Require App Protection Policy',
     block: 'Block Access', passwordChange: 'Require Password Change',
+  }
+
+  const SEV_COLOR  = { critical: '#dc2626', high: '#ea580c', medium: '#ca8a04', low: '#16a34a', info: '#0369a1' }
+  const SEV_BG     = { critical: '#fef2f2', high: '#fff7ed', medium: '#fffbeb', low: '#f0fdf4', info: '#f0f9ff' }
+  const SEV_ORDER  = { critical: 0, high: 1, medium: 2, low: 3, info: 4 }
+  const STATE_COLOR = {
+    enabled:                           { fg: '#15803d', bg: '#dcfce7' },
+    enabledForReportingButNotEnforced: { fg: '#b45309', bg: '#fef3c7' },
+    disabled:                          { fg: '#6b7280', bg: '#f3f4f6' },
   }
 
   function fmtUsers(u) {
@@ -533,79 +554,67 @@ function generateDocxHtml(orgName, policies, date, nameMap = {}, recommendations
   const reportOnly = policies.filter(p => stateOf(p) === 'enabledForReportingButNotEnforced')
   const disabled   = policies.filter(p => stateOf(p) === 'disabled')
 
-  const STATE_COLOR = {
-    enabled:                           { fg: '#15803d', bg: '#dcfce7' },
-    enabledForReportingButNotEnforced: { fg: '#b45309', bg: '#fef3c7' },
-    disabled:                          { fg: '#6b7280', bg: '#f3f4f6' },
-  }
-  const SEV_COLOR = { critical: '#dc2626', high: '#ea580c', medium: '#ca8a04', low: '#16a34a', info: '#0369a1' }
-  const SEV_BG    = { critical: '#fef2f2', high: '#fff7ed', medium: '#fffbeb', low: '#f0fdf4', info: '#f0f9ff' }
-  const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3, info: 4 }
-
-  // ── Policy inventory table rows ─────────────────────────────────────────────
+  // ── Policy inventory rows — pixel widths match header (280+88+148+132=648) ──
   const inventoryRows = policies.map((p, i) => {
-    const state  = stateOf(p)
-    const sc     = STATE_COLOR[state] || STATE_COLOR.disabled
-    const bg     = i % 2 === 0 ? '#ffffff' : '#f8fafc'
+    const state = stateOf(p)
+    const sc    = STATE_COLOR[state] || STATE_COLOR.disabled
+    const bg    = i % 2 === 0 ? '#ffffff' : '#f8fafc'
     return `<tr style="background:${bg}">
-      <td style="padding:7px 12px;font-size:10pt;font-weight:600;color:#111827;border-bottom:1px solid #e5e7eb">${esc(pv(p, 'DisplayName', 'displayName') || '')}</td>
-      <td style="padding:7px 12px;border-bottom:1px solid #e5e7eb;white-space:nowrap">
-        <span style="background:${sc.bg};color:${sc.fg};padding:2px 8px;font-size:9pt;font-weight:700">${stateLabel(state)}</span>
-      </td>
-      <td style="padding:7px 12px;font-size:10pt;color:#374151;border-bottom:1px solid #e5e7eb">${esc(fmtUsers(pv(pv(p, 'Conditions', 'conditions'), 'Users', 'users')) || '—')}</td>
-      <td style="padding:7px 12px;font-size:10pt;color:#374151;border-bottom:1px solid #e5e7eb">${esc(fmtGrant(pv(p, 'GrantControls', 'grantControls')) || '—')}</td>
+      <td width="280" style="padding:7px 10px;font-size:10pt;font-weight:600;color:#111827;border-bottom:1px solid #e5e7eb">${esc(pv(p, 'DisplayName', 'displayName') || '')}</td>
+      <td width="88" style="padding:7px 10px;border-bottom:1px solid #e5e7eb"><span style="background:${sc.bg};color:${sc.fg};padding:2px 8px;font-size:9pt;font-weight:700">${stateLabel(state)}</span></td>
+      <td width="148" style="padding:7px 10px;font-size:10pt;color:#374151;border-bottom:1px solid #e5e7eb">${esc(fmtUsers(pv(pv(p, 'Conditions', 'conditions'), 'Users', 'users')) || '—')}</td>
+      <td width="132" style="padding:7px 10px;font-size:10pt;color:#374151;border-bottom:1px solid #e5e7eb">${esc(fmtGrant(pv(p, 'GrantControls', 'grantControls')) || '—')}</td>
     </tr>`
   }).join('')
 
-  // ── Baseline compliance summary rows ────────────────────────────────────────
-  const baselineSummaryRows = recommendations.map((r, i) => {
+  // ── Baseline compliance rows — pixel widths (280+80+120+168=648) ────────────
+  const baselineRows = recommendations.map((r, i) => {
     const pct      = r.totalCaCount > 0 ? Math.round((r.presentCount / r.totalCaCount) * 100) : 100
     const pctColor = pct === 100 ? '#15803d' : pct >= 70 ? '#b45309' : '#dc2626'
     const bg       = i % 2 === 0 ? '#ffffff' : '#f8fafc'
-    const status   = r.missingItems.length === 0
-      ? `<span style="color:#15803d;font-weight:700">&#10003; Compliant</span>`
-      : `<span style="color:#dc2626;font-weight:700">${r.missingItems.length} gap${r.missingItems.length > 1 ? 's' : ''} identified</span>`
+    const finding  = r.missingItems.length === 0
+      ? `<strong style="color:#15803d">&#10003; Compliant</strong>`
+      : `<strong style="color:#dc2626">${r.missingItems.length} gap${r.missingItems.length > 1 ? 's' : ''}</strong>`
     return `<tr style="background:${bg}">
-      <td style="padding:8px 12px;font-size:10pt;font-weight:700;color:#111827;border-bottom:1px solid #e5e7eb">${esc(r.name)}</td>
-      <td style="padding:8px 12px;font-size:16pt;font-weight:700;color:${pctColor};border-bottom:1px solid #e5e7eb;text-align:center">${pct}%</td>
-      <td style="padding:8px 12px;font-size:10pt;color:#374151;border-bottom:1px solid #e5e7eb;text-align:center">${r.presentCount} / ${r.totalCaCount}</td>
-      <td style="padding:8px 12px;font-size:10pt;border-bottom:1px solid #e5e7eb">${status}</td>
+      <td width="280" style="padding:8px 10px;font-size:10pt;font-weight:600;color:${NAV};border-bottom:1px solid #e5e7eb">${esc(r.name)}</td>
+      <td width="80" style="padding:8px 10px;font-size:18pt;font-weight:700;color:${pctColor};text-align:center;border-bottom:1px solid #e5e7eb">${pct}%</td>
+      <td width="120" style="padding:8px 10px;font-size:10pt;color:#374151;text-align:center;border-bottom:1px solid #e5e7eb">${r.presentCount} / ${r.totalCaCount}</td>
+      <td width="168" style="padding:8px 10px;font-size:10pt;border-bottom:1px solid #e5e7eb">${finding}</td>
     </tr>`
   }).join('')
 
-  // ── Per-baseline gap detail sections ────────────────────────────────────────
+  // ── Per-baseline gap sections — table headings, pixel widths (64+210+84+290=648)
   const gapSections = recommendations.filter(r => r.missingItems.length > 0).map(r => {
-    const pct      = r.totalCaCount > 0 ? Math.round((r.presentCount / r.totalCaCount) * 100) : 100
-    const pctColor = pct >= 70 ? '#b45309' : '#dc2626'
-    const sortedMissing = [...r.missingItems].sort((a, b) => (SEV_ORDER[a.severity] ?? 5) - (SEV_ORDER[b.severity] ?? 5))
-    const rows = sortedMissing.map((item, i) => {
+    const pct         = r.totalCaCount > 0 ? Math.round((r.presentCount / r.totalCaCount) * 100) : 100
+    const pctColor    = pct >= 70 ? '#b45309' : '#dc2626'
+    const sortedItems = [...r.missingItems].sort((a, b) => (SEV_ORDER[a.severity] ?? 5) - (SEV_ORDER[b.severity] ?? 5))
+    const rows = sortedItems.map((item, i) => {
       const bg = i % 2 === 0 ? '#ffffff' : '#f8fafc'
       return `<tr style="background:${bg}">
-        <td style="padding:7px 10px;font-family:'Courier New',monospace;font-size:9pt;color:#6b7280;white-space:nowrap;border-bottom:1px solid #e5e7eb">${esc(item.id)}</td>
-        <td style="padding:7px 10px;font-size:10pt;font-weight:600;color:#111827;border-bottom:1px solid #e5e7eb">${esc(item.name)}</td>
-        <td style="padding:7px 10px;white-space:nowrap;border-bottom:1px solid #e5e7eb">
-          <span style="background:${SEV_BG[item.severity]||'#f3f4f6'};color:${SEV_COLOR[item.severity]||'#6b7280'};padding:2px 8px;font-size:9pt;font-weight:700">${item.severity.charAt(0).toUpperCase()+item.severity.slice(1)}</span>
-        </td>
-        <td style="padding:7px 10px;font-size:9pt;color:#6b7280;border-bottom:1px solid #e5e7eb">${esc(POLICY_DESC[item.id] || '')}</td>
+        <td width="64" style="padding:7px 10px;font-family:'Courier New',monospace;font-size:9pt;color:#6b7280;border-bottom:1px solid #e5e7eb">${esc(item.id)}</td>
+        <td width="210" style="padding:7px 10px;font-size:10pt;font-weight:600;color:#111827;border-bottom:1px solid #e5e7eb">${esc(item.name)}</td>
+        <td width="84" style="padding:7px 10px;border-bottom:1px solid #e5e7eb"><span style="background:${SEV_BG[item.severity]||'#f3f4f6'};color:${SEV_COLOR[item.severity]||'#6b7280'};padding:2px 7px;font-size:9pt;font-weight:700">${item.severity.charAt(0).toUpperCase()+item.severity.slice(1)}</span></td>
+        <td width="290" style="padding:7px 10px;font-size:9pt;color:#6b7280;border-bottom:1px solid #e5e7eb">${esc(POLICY_DESC[item.id] || '')}</td>
       </tr>`
     }).join('')
-    return `<h3 style="font-size:12pt;font-weight:700;color:#1a2d4a;margin-top:20px;margin-bottom:2px">${esc(r.name)} — <span style="color:${pctColor}">${pct}% compliant</span></h3>
-<p style="font-size:10pt;color:#6b7280;margin-bottom:8px">${esc(r.description || '')}</p>
-<table style="width:100%;border-collapse:collapse;margin-bottom:12px">
-  <thead>
-    <tr>
-      <th style="background:#1a2d4a;color:#ffffff;padding:7px 10px;text-align:left;font-size:9pt;font-weight:700">Policy ID</th>
-      <th style="background:#1a2d4a;color:#ffffff;padding:7px 10px;text-align:left;font-size:9pt;font-weight:700">Recommended Policy</th>
-      <th style="background:#1a2d4a;color:#ffffff;padding:7px 10px;text-align:left;font-size:9pt;font-weight:700">Priority</th>
-      <th style="background:#1a2d4a;color:#ffffff;padding:7px 10px;text-align:left;font-size:9pt;font-weight:700">What it protects against</th>
-    </tr>
-  </thead>
-  <tbody>${rows}</tbody>
+    return `
+<table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin:20px 0 4px 0">
+  <tr><td style="padding:0 0 5px 0;font-size:12pt;font-weight:700;color:${NAV};border-bottom:2px solid ${GOLD}">${esc(r.name)} &mdash; <span style="color:${pctColor}">${pct}% compliant</span></td></tr>
 </table>
-${r.unverifiableCount > 0 ? `<p style="font-size:9pt;color:#9ca3af;font-style:italic;margin-bottom:16px">${r.unverifiableCount} Identity Protection ${r.unverifiableCount === 1 ? 'policy' : 'policies'} in this baseline require a separate Entra ID Identity Protection review and an Entra ID P2 licence.</p>` : ''}`
+<p style="font-size:10pt;color:#6b7280;margin:4px 0 8px 0">${esc(r.description || '')}</p>
+<table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin-bottom:12px">
+  <tr>
+    <td width="64" style="${TH}">ID</td>
+    <td width="210" style="${TH}">Recommended Policy</td>
+    <td width="84" style="${TH}">Priority</td>
+    <td width="290" style="${TH}">What it protects against</td>
+  </tr>
+  ${rows}
+</table>
+${r.unverifiableCount > 0 ? `<p style="font-size:9pt;color:#9ca3af;font-style:italic;margin-bottom:12px">${r.unverifiableCount} Identity Protection ${r.unverifiableCount === 1 ? 'policy' : 'policies'} in this baseline require a separate Entra ID Identity Protection review and an Entra ID P2 licence.</p>` : ''}`
   }).join('')
 
-  // ── Consolidated action plan (all unique missing items, sorted by severity) ──
+  // ── Consolidated action plan — pixel widths (36+64+84+212+252=648) ──────────
   const seen = new Set()
   const allMissing = []
   for (const r of recommendations) {
@@ -616,147 +625,88 @@ ${r.unverifiableCount > 0 ? `<p style="font-size:9pt;color:#9ca3af;font-style:it
   allMissing.sort((a, b) => (SEV_ORDER[a.severity] ?? 5) - (SEV_ORDER[b.severity] ?? 5))
 
   const actionRows = allMissing.map((item, i) => {
-    const bg = i % 2 === 0 ? '#ffffff' : '#f8fafc'
+    const bg  = i % 2 === 0 ? '#ffffff' : '#f8fafc'
+    const sc  = SEV_COLOR[item.severity] || '#6b7280'
+    const sbg = SEV_BG[item.severity]    || '#f3f4f6'
     return `<tr style="background:${bg}">
-      <td style="padding:7px 12px;font-size:10pt;font-weight:700;color:#1a2d4a;text-align:center;border-bottom:1px solid #e5e7eb">${i + 1}</td>
-      <td style="padding:7px 12px;font-family:'Courier New',monospace;font-size:9pt;color:#6b7280;white-space:nowrap;border-bottom:1px solid #e5e7eb">${esc(item.id)}</td>
-      <td style="padding:7px 12px;font-size:10pt;font-weight:600;color:#111827;border-bottom:1px solid #e5e7eb">${esc(item.name)}</td>
-      <td style="padding:7px 12px;white-space:nowrap;border-bottom:1px solid #e5e7eb">
-        <span style="background:${SEV_BG[item.severity]||'#f3f4f6'};color:${SEV_COLOR[item.severity]||'#6b7280'};padding:2px 8px;font-size:9pt;font-weight:700">${item.severity.charAt(0).toUpperCase()+item.severity.slice(1)}</span>
-      </td>
+      <td width="36" style="padding:7px 10px;font-size:10pt;font-weight:700;color:${NAV};text-align:center;border-bottom:1px solid #e5e7eb">${i + 1}</td>
+      <td width="64" style="padding:7px 10px;font-family:'Courier New',monospace;font-size:9pt;color:#6b7280;border-bottom:1px solid #e5e7eb">${esc(item.id)}</td>
+      <td width="84" style="padding:7px 10px;border-bottom:1px solid #e5e7eb"><span style="background:${sbg};color:${sc};padding:2px 7px;font-size:9pt;font-weight:700">${item.severity.charAt(0).toUpperCase()+item.severity.slice(1)}</span></td>
+      <td width="212" style="padding:7px 10px;font-size:10pt;font-weight:600;color:#111827;border-bottom:1px solid #e5e7eb">${esc(item.name)}</td>
+      <td width="252" style="padding:7px 10px;font-size:9pt;color:#374151;border-bottom:1px solid #e5e7eb">${esc(POLICY_DESC[item.id] || item.severity.charAt(0).toUpperCase() + item.severity.slice(1) + ' priority')}</td>
     </tr>`
   }).join('')
 
-  // ── HTML (table-based layout — Word-safe, no CSS grid/flex) ────────────────
-  const NAV = '#1a2d4a'
-  const GOLD = '#E8A830'
-  const TH = `background:${NAV};color:#ffffff;padding:8px 12px;font-size:10pt;font-weight:700;text-align:left`
-
-  function sectionHeading(text) {
-    return `<table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin:28px 0 12px 0">
-  <tr>
-    <td style="padding:0 0 6px 0;font-size:14pt;font-weight:700;color:${NAV};border-bottom:3px solid ${GOLD}">${text}</td>
-  </tr>
-</table>`
-  }
-
-  function pageBreak() {
-    return `<p style="page-break-before:always;margin:0;font-size:1pt">&nbsp;</p>`
-  }
-
+  // ── HTML (Word-safe: table layout, solid hex colours, no rgba/grid/flex) ────
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"></head>
 <body style="font-family:Calibri,'Segoe UI',Arial,sans-serif;font-size:11pt;color:#374151;line-height:1.55;margin:0;padding:0">
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     COVER PAGE
-════════════════════════════════════════════════════════════════════════════ -->
+<!-- ═══ COVER ════════════════════════════════════════════════════════════════ -->
 
-<!-- Gold top bar -->
 <table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse">
   <tr><td style="background:${GOLD};height:6px;font-size:1pt">&nbsp;</td></tr>
 </table>
 
-<!-- Navy header -->
 <table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse">
   <tr>
     <td style="background:${NAV};padding:36px 40px 40px 40px">
-      <p style="font-size:32pt;font-weight:200;color:#ffffff;margin:0;letter-spacing:-1px;line-height:1">affinity</p>
-      <p style="font-size:9pt;color:${GOLD};margin:6px 0 0 0;letter-spacing:2px">TECHNOLOGY. TOGETHER.</p>
+      <p style="font-size:32pt;font-weight:200;color:#ffffff;margin:0;line-height:1">affinity</p>
+      <p style="font-size:9pt;color:${GOLD};margin:8px 0 0 0">TECHNOLOGY. TOGETHER.</p>
     </td>
   </tr>
 </table>
 
-<!-- Report title block -->
 <table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin-top:52px">
-  <tr>
-    <td style="padding:0 0 4px 0">
-      <p style="font-size:8pt;font-weight:700;color:#9ca3af;letter-spacing:3px;margin:0">MICROSOFT 365 SECURITY ASSESSMENT</p>
-    </td>
-  </tr>
-  <tr>
-    <td style="padding:6px 0 8px 0">
-      <p style="font-size:30pt;font-weight:700;color:${NAV};margin:0;line-height:1.15">${esc(orgName || 'Tenant Report')}</p>
-    </td>
-  </tr>
-  <tr>
-    <td style="padding:0 0 48px 0">
-      <p style="font-size:11pt;color:#6b7280;margin:0">${esc(date)}</p>
-    </td>
-  </tr>
+  <tr><td style="padding:0 0 4px 0"><p style="font-size:8pt;font-weight:700;color:#9ca3af;margin:0">MICROSOFT 365 SECURITY ASSESSMENT</p></td></tr>
+  <tr><td style="padding:6px 0 8px 0"><p style="font-size:30pt;font-weight:700;color:${NAV};margin:0;line-height:1.15">${esc(orgName || 'Tenant Report')}</p></td></tr>
+  <tr><td style="padding:0 0 48px 0"><p style="font-size:11pt;color:#6b7280;margin:0">${esc(date)}</p></td></tr>
 </table>
 
-<!-- Confidentiality notice -->
 <table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin-bottom:40px">
   <tr>
     <td width="4" style="background:${GOLD}">&nbsp;</td>
     <td style="padding:14px 18px;background:#f8fafc;font-size:10pt;color:#374151">
-      <strong style="color:${NAV}">Confidential</strong> &mdash; Prepared by Affinity IT for
-      <strong style="color:${NAV}">${esc(orgName || 'your organisation')}</strong>.
-      This document provides a full assessment of the Microsoft 365 Conditional Access security
-      posture, identifies gaps against Microsoft&rsquo;s recommended security baselines, and presents
-      a prioritised action plan for remediation.
+      <strong style="color:${NAV}">Confidential</strong> &mdash; Prepared by Affinity IT for <strong style="color:${NAV}">${esc(orgName || 'your organisation')}</strong>.
+      This document provides a full assessment of the Microsoft 365 Conditional Access security posture, identifies gaps against Microsoft&rsquo;s recommended security baselines, and presents a prioritised action plan for remediation.
     </td>
   </tr>
 </table>
 
-<!-- Stats strip -->
+<!-- Stats strip — solid colours only (no rgba) -->
 <table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse">
   <tr>
-    <td width="162" style="padding:20px 12px;background:${NAV};text-align:center;border-right:1px solid rgba(255,255,255,0.1)">
+    <td width="162" style="padding:20px 12px;background:${NAV};text-align:center;border-right:1px solid #243d5e">
       <p style="font-size:28pt;font-weight:700;color:#ffffff;margin:0;line-height:1">${policies.length}</p>
-      <p style="font-size:8pt;font-weight:700;color:rgba(255,255,255,0.55);margin:6px 0 0 0;letter-spacing:1px">TOTAL POLICIES</p>
+      <p style="font-size:8pt;font-weight:700;color:#a8b5c4;margin:6px 0 0 0">TOTAL POLICIES</p>
     </td>
-    <td width="162" style="padding:20px 12px;background:${NAV};text-align:center;border-right:1px solid rgba(255,255,255,0.1)">
+    <td width="162" style="padding:20px 12px;background:${NAV};text-align:center;border-right:1px solid #243d5e">
       <p style="font-size:28pt;font-weight:700;color:#4ade80;margin:0;line-height:1">${enabled.length}</p>
-      <p style="font-size:8pt;font-weight:700;color:rgba(255,255,255,0.55);margin:6px 0 0 0;letter-spacing:1px">ENFORCED</p>
+      <p style="font-size:8pt;font-weight:700;color:#a8b5c4;margin:6px 0 0 0">ENFORCED</p>
     </td>
-    <td width="162" style="padding:20px 12px;background:${NAV};text-align:center;border-right:1px solid rgba(255,255,255,0.1)">
+    <td width="162" style="padding:20px 12px;background:${NAV};text-align:center;border-right:1px solid #243d5e">
       <p style="font-size:28pt;font-weight:700;color:#fbbf24;margin:0;line-height:1">${reportOnly.length}</p>
-      <p style="font-size:8pt;font-weight:700;color:rgba(255,255,255,0.55);margin:6px 0 0 0;letter-spacing:1px">AUDIT MODE</p>
+      <p style="font-size:8pt;font-weight:700;color:#a8b5c4;margin:6px 0 0 0">AUDIT MODE</p>
     </td>
     <td width="162" style="padding:20px 12px;background:${NAV};text-align:center">
       <p style="font-size:28pt;font-weight:700;color:#9ca3af;margin:0;line-height:1">${disabled.length}</p>
-      <p style="font-size:8pt;font-weight:700;color:rgba(255,255,255,0.55);margin:6px 0 0 0;letter-spacing:1px">DISABLED</p>
+      <p style="font-size:8pt;font-weight:700;color:#a8b5c4;margin:6px 0 0 0">DISABLED</p>
     </td>
   </tr>
 </table>
 
 ${pageBreak()}
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     EXECUTIVE SUMMARY
-════════════════════════════════════════════════════════════════════════════ -->
+<!-- ═══ EXECUTIVE SUMMARY ═════════════════════════════════════════════════════ -->
 ${sectionHeading('Executive Summary')}
 
-<p style="margin:0 0 10px 0;font-size:11pt;color:#374151">
-  This report documents the Conditional Access policy configuration for
-  <strong style="color:${NAV}">${esc(orgName || 'your organisation')}</strong> as of
-  <strong style="color:${NAV}">${esc(date)}</strong>. Conditional Access is the
-  enforcement layer in Microsoft Entra ID that governs who can access cloud applications,
-  from which devices and locations, and under what conditions.
-</p>
-<p style="margin:0 0 10px 0;font-size:11pt;color:#374151">
-  The assessment reviewed
-  <strong style="color:${NAV}">${policies.length} Conditional Access ${policies.length === 1 ? 'policy' : 'policies'}</strong>
-  and compared the configuration against Microsoft&rsquo;s recommended security baselines.
-  ${recommendations.length > 0 && allMissing.length > 0
-    ? `<strong style="color:#dc2626">${allMissing.length} recommended ${allMissing.length === 1 ? 'policy' : 'policies'}</strong> were not detected across the assessed baselines.`
-    : recommendations.length > 0
-    ? `<strong style="color:#15803d">All assessed baseline policies are in place.</strong>`
-    : ''
-  }
-</p>
+<p style="margin:0 0 10px 0;font-size:11pt;color:#374151">This report documents the Conditional Access policy configuration for <strong style="color:${NAV}">${esc(orgName || 'your organisation')}</strong> as of <strong style="color:${NAV}">${esc(date)}</strong>. Conditional Access is the enforcement layer in Microsoft Entra ID that governs who can access cloud applications, from which devices and locations, and under what conditions.</p>
+<p style="margin:0 0 10px 0;font-size:11pt;color:#374151">The assessment reviewed <strong style="color:${NAV}">${policies.length} Conditional Access ${policies.length === 1 ? 'policy' : 'policies'}</strong> and compared the configuration against Microsoft&rsquo;s recommended security baselines. ${recommendations.length > 0 && allMissing.length > 0 ? `<strong style="color:#dc2626">${allMissing.length} recommended ${allMissing.length === 1 ? 'policy' : 'policies'}</strong> were not detected across the assessed baselines.` : recommendations.length > 0 ? `<strong style="color:#15803d">All assessed baseline policies are in place.</strong>` : ''}</p>
 
 ${recommendations.length > 0 ? `
 ${sectionHeading('Baseline Compliance Overview')}
-
-<p style="margin:0 0 10px 0;font-size:11pt;color:#374151">
-  The table below compares the current Conditional Access configuration against each selected Microsoft security baseline.
-  Coverage is calculated as the percentage of expected policies detected in the tenant.
-</p>
-
+<p style="margin:0 0 10px 0;font-size:11pt;color:#374151">The table below compares the current Conditional Access configuration against each selected Microsoft security baseline. Coverage is calculated as the percentage of expected policies detected in the tenant.</p>
 <table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin-bottom:16px">
   <tr>
     <td width="280" style="${TH}">Baseline</td>
@@ -764,90 +714,46 @@ ${sectionHeading('Baseline Compliance Overview')}
     <td width="120" style="${TH};text-align:center">Detected</td>
     <td width="168" style="${TH}">Finding</td>
   </tr>
-  ${recommendations.map((r, i) => {
-    const pct      = r.totalCaCount > 0 ? Math.round((r.presentCount / r.totalCaCount) * 100) : 100
-    const pctColor = pct === 100 ? '#15803d' : pct >= 70 ? '#b45309' : '#dc2626'
-    const bg       = i % 2 === 0 ? '#ffffff' : '#f8fafc'
-    const finding  = r.missingItems.length === 0
-      ? `<strong style="color:#15803d">&#10003; Compliant</strong>`
-      : `<strong style="color:#dc2626">${r.missingItems.length} gap${r.missingItems.length > 1 ? 's' : ''}</strong>`
-    return `<tr style="background:${bg}">
-      <td width="280" style="padding:8px 12px;font-size:10pt;font-weight:600;color:${NAV};border-bottom:1px solid #e5e7eb">${esc(r.name)}</td>
-      <td width="80" style="padding:8px 12px;font-size:18pt;font-weight:700;color:${pctColor};text-align:center;border-bottom:1px solid #e5e7eb">${pct}%</td>
-      <td width="120" style="padding:8px 12px;font-size:10pt;color:#374151;text-align:center;border-bottom:1px solid #e5e7eb">${r.presentCount} / ${r.totalCaCount}</td>
-      <td width="168" style="padding:8px 12px;font-size:10pt;border-bottom:1px solid #e5e7eb">${finding}</td>
-    </tr>`
-  }).join('')}
+  ${baselineRows}
 </table>
 ` : ''}
 
 ${pageBreak()}
 
 ${gapSections.length > 0 ? `
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     GAP ANALYSIS
-════════════════════════════════════════════════════════════════════════════ -->
+<!-- ═══ GAP ANALYSIS ══════════════════════════════════════════════════════════ -->
 ${sectionHeading('Gap Analysis &amp; Recommendations')}
-
-<p style="margin:0 0 14px 0;font-size:11pt;color:#374151">
-  The following section details each missing policy, the risk it addresses, and the specific protection it provides.
-  Policies are matched by ID in their display name <em>or</em> by their configuration &mdash; any existing policy
-  with the correct settings is detected regardless of its name.
-</p>
-
+<p style="margin:0 0 14px 0;font-size:11pt;color:#374151">The following section details each missing policy, the risk it addresses, and the specific protection it provides. Policies are matched by ID in their display name or by their configuration &mdash; any existing policy with the correct settings is detected regardless of its name.</p>
 ${gapSections}
 ` : recommendations.length > 0 ? `
 ${sectionHeading('Gap Analysis')}
 <table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin-bottom:16px">
   <tr>
     <td width="4" style="background:#15803d">&nbsp;</td>
-    <td style="padding:14px 18px;background:#f0fdf4;font-size:11pt;color:#15803d;font-weight:700">
-      &#10003; Excellent &mdash; all assessed baseline policies are detected in this tenant.
-    </td>
+    <td style="padding:14px 18px;background:#f0fdf4;font-size:11pt;color:#15803d;font-weight:700">&#10003; Excellent &mdash; all assessed baseline policies are detected in this tenant.</td>
   </tr>
 </table>
 ` : ''}
 
 ${allMissing.length > 0 ? `
 ${sectionHeading('Recommended Action Plan')}
-
-<p style="margin:0 0 10px 0;font-size:11pt;color:#374151">
-  The table below consolidates all recommended policies across the selected baselines, ordered by priority.
-  Affinity IT can design, test in Report Only mode, and phase the enforcement of these policies to avoid disruption.
-</p>
-
+<p style="margin:0 0 10px 0;font-size:11pt;color:#374151">The table below consolidates all recommended policies across the selected baselines, ordered by priority. Affinity IT can design, test in Report Only mode, and phase the enforcement of these policies to avoid disruption.</p>
 <table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin-bottom:16px">
   <tr>
     <td width="36" style="${TH};text-align:center">#</td>
-    <td width="64" style="${TH}">Policy ID</td>
-    <td width="300" style="${TH}">Policy to Implement</td>
-    <td width="248" style="${TH}">What it protects</td>
+    <td width="64" style="${TH}">ID</td>
+    <td width="84" style="${TH}">Priority</td>
+    <td width="212" style="${TH}">Policy to Implement</td>
+    <td width="252" style="${TH}">What it protects</td>
   </tr>
-  ${allMissing.map((item, i) => {
-    const bg   = i % 2 === 0 ? '#ffffff' : '#f8fafc'
-    const sc   = SEV_COLOR[item.severity] || '#6b7280'
-    const sbg  = SEV_BG[item.severity]   || '#f3f4f6'
-    return `<tr style="background:${bg}">
-      <td width="36" style="padding:7px 12px;font-size:10pt;font-weight:700;color:${NAV};text-align:center;border-bottom:1px solid #e5e7eb">${i + 1}</td>
-      <td width="64" style="padding:7px 12px;font-family:'Courier New',monospace;font-size:9pt;color:#6b7280;border-bottom:1px solid #e5e7eb">${esc(item.id)}</td>
-      <td width="300" style="padding:7px 12px;font-size:10pt;font-weight:600;color:#111827;border-bottom:1px solid #e5e7eb">${esc(item.name)}</td>
-      <td width="248" style="padding:7px 12px;font-size:9pt;color:#374151;border-bottom:1px solid #e5e7eb">${esc(POLICY_DESC[item.id] || item.severity.charAt(0).toUpperCase() + item.severity.slice(1) + ' priority')}</td>
-    </tr>`
-  }).join('')}
+  ${actionRows}
 </table>
 
-<!-- Next steps callout -->
 <table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin-bottom:24px">
   <tr>
     <td width="4" style="background:${GOLD}">&nbsp;</td>
     <td style="padding:16px 20px;background:#fffbeb;font-size:10pt;color:#374151">
-      <strong style="color:${NAV}">Recommended next steps:</strong>
-      Affinity IT advises deploying new policies in <em>Report Only</em> mode first to evaluate
-      impact before full enforcement. This avoids accidental lockouts and provides a clear audit trail.
-      ${amName && amEmail
-        ? ` Contact <strong style="color:${NAV}">${esc(amName)}</strong> at <a href="mailto:${esc(amEmail)}" style="color:${NAV}">${esc(amEmail)}</a> to discuss a phased implementation programme.`
-        : ' Contact your Affinity IT account manager to discuss a phased implementation programme.'
-      }
+      <strong style="color:${NAV}">Recommended next steps:</strong> Affinity IT advises deploying new policies in Report Only mode first to evaluate impact before full enforcement. This avoids accidental lockouts and provides a clear audit trail.${amName && amEmail ? ` Contact <strong style="color:${NAV}">${esc(amName)}</strong> at <a href="mailto:${esc(amEmail)}" style="color:${NAV}">${esc(amEmail)}</a> to discuss a phased implementation programme.` : ' Contact your Affinity IT account manager to discuss a phased implementation programme.'}
     </td>
   </tr>
 </table>
@@ -855,16 +761,9 @@ ${sectionHeading('Recommended Action Plan')}
 
 ${pageBreak()}
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     POLICY INVENTORY
-════════════════════════════════════════════════════════════════════════════ -->
+<!-- ═══ POLICY INVENTORY ═══════════════════════════════════════════════════════ -->
 ${sectionHeading('Conditional Access Policy Inventory')}
-
-<p style="margin:0 0 10px 0;font-size:11pt;color:#374151">
-  The following table lists all ${policies.length} Conditional Access ${policies.length === 1 ? 'policy' : 'policies'}
-  currently configured in the <strong style="color:${NAV}">${esc(orgName || 'tenant')}</strong> environment.
-</p>
-
+<p style="margin:0 0 10px 0;font-size:11pt;color:#374151">The following table lists all ${policies.length} Conditional Access ${policies.length === 1 ? 'policy' : 'policies'} currently configured in the <strong style="color:${NAV}">${esc(orgName || 'tenant')}</strong> environment.</p>
 <table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin-bottom:24px">
   <tr>
     <td width="280" style="${TH}">Policy Name</td>
@@ -875,14 +774,12 @@ ${sectionHeading('Conditional Access Policy Inventory')}
   ${inventoryRows}
 </table>
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     CONTACT & FOOTER
-════════════════════════════════════════════════════════════════════════════ -->
+<!-- ═══ CONTACT & FOOTER ══════════════════════════════════════════════════════ -->
 ${amName && amEmail ? `
 <table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin-top:32px;margin-bottom:16px">
   <tr>
     <td style="background:${NAV};padding:24px 32px">
-      <p style="font-size:10pt;font-weight:700;color:rgba(255,255,255,0.6);letter-spacing:1px;margin:0 0 6px 0">YOUR ACCOUNT MANAGER</p>
+      <p style="font-size:10pt;font-weight:700;color:#99a8b8;margin:0 0 6px 0">YOUR ACCOUNT MANAGER</p>
       <p style="font-size:14pt;font-weight:700;color:#ffffff;margin:0 0 4px 0">${esc(amName)}</p>
       <p style="font-size:10pt;color:${GOLD};margin:0"><a href="mailto:${esc(amEmail)}" style="color:${GOLD};text-decoration:none">${esc(amEmail)}</a></p>
     </td>
@@ -893,9 +790,7 @@ ${amName && amEmail ? `
 <table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin-top:24px">
   <tr>
     <td style="border-top:2px solid ${GOLD};padding-top:10px">
-      <p style="font-size:9pt;color:#9ca3af;margin:0">
-        Generated by M365 Security Policy Manager &middot; Affinity IT &middot; ${esc(date)} &middot; Confidential
-      </p>
+      <p style="font-size:9pt;color:#9ca3af;margin:0">Generated by M365 Security Policy Manager &middot; Affinity IT &middot; ${esc(date)} &middot; Confidential</p>
     </td>
   </tr>
 </table>
@@ -1367,9 +1262,13 @@ Write-Output "NAME_MAP_END"`,
     if (!psSession.alive) return { items: [], error: 'No active session' }
     const safeQ = safe(query || '')
     if (!safeQ) return { items: [] }
+    // Use startsWith filter across displayName, UPN, and mail so searching "tom"
+    // finds tom@domain.com even if the display name doesn't start with "tom"
     const script = `
 try {
-  $users = Get-MgUser -Search "displayName:${safeQ}" -ConsistencyLevel eventual -Top 10 -Select 'id,displayName,mail,userPrincipalName' -OrderBy displayName -ErrorAction Stop
+  $q = '${safeQ}'
+  $filter = "startsWith(displayName,'$q') or startsWith(userPrincipalName,'$q') or startsWith(mail,'$q')"
+  $users = Get-MgUser -Filter $filter -Top 15 -Select 'id,displayName,mail,userPrincipalName' -ErrorAction Stop
   $result = @($users) | ForEach-Object {
     @{ id = $_.Id; displayName = $_.DisplayName; mail = if ($_.Mail) { $_.Mail } else { $_.UserPrincipalName } }
   }
@@ -1394,7 +1293,8 @@ try {
     if (!safeQ) return { items: [] }
     const script = `
 try {
-  $groups = Get-MgGroup -Search "displayName:${safeQ}" -ConsistencyLevel eventual -Top 10 -Select 'id,displayName,description' -OrderBy displayName -ErrorAction Stop
+  $q = '${safeQ}'
+  $groups = Get-MgGroup -Filter "startsWith(displayName,'$q')" -Top 15 -Select 'id,displayName,description' -ErrorAction Stop
   $result = @($groups) | ForEach-Object {
     @{ id = $_.Id; displayName = $_.DisplayName; description = $_.Description }
   }
