@@ -11,6 +11,11 @@ const fs = require('fs')
 const psSession = require('./psSession')
 const HTMLtoDOCX = require('html-to-docx')
 
+// Shared mutable window reference — updated each time registerIpcHandlers is
+// called so closures always send to the current window without re-registering.
+const winRef = { current: null }
+let handlersRegistered = false
+
 
 
 function recSection(recommendations, esc, date) {
@@ -789,6 +794,14 @@ can assist with the design, testing (Report Only mode), and phased enforcement o
 }
 
 function registerIpcHandlers(win) {
+  // Always update the shared reference so existing handler closures point to
+  // the current window (important when the window is recreated on macOS).
+  winRef.current = win
+
+  // Only register handlers once — ipcMain.handle throws on duplicate channels.
+  if (handlersRegistered) return
+  handlersRegistered = true
+
   // Store
   ipcMain.handle('store:get', (_, key) => store.get(key))
   ipcMain.handle('store:set', (_, key, value) => store.set(key, value))
@@ -822,11 +835,11 @@ function registerIpcHandlers(win) {
       moduleNames,
       (line) => {
         logs.push(line)
-        win.webContents.send('ps:output', line)
+        winRef.current?.webContents.send('ps:output', line)
       },
       (line) => {
         logs.push(`ERROR: ${line}`)
-        win.webContents.send('ps:error', line)
+        winRef.current?.webContents.send('ps:error', line)
       }
     )
     return logs
@@ -840,11 +853,11 @@ function registerIpcHandlers(win) {
       moduleNames,
       (line) => {
         logs.push(line)
-        win.webContents.send('ps:output', line)
+        winRef.current?.webContents.send('ps:output', line)
       },
       (line) => {
         logs.push(`ERROR: ${line}`)
-        win.webContents.send('ps:error', line)
+        winRef.current?.webContents.send('ps:error', line)
       }
     )
     return logs
@@ -872,12 +885,12 @@ function registerIpcHandlers(win) {
 
       proc.stdout.on('data', (d) => {
         d.toString().split('\n').forEach(line => {
-          if (line.trim()) win.webContents.send('ps:output', line)
+          if (line.trim()) winRef.current?.webContents.send('ps:output', line)
         })
       })
       proc.stderr.on('data', (d) => {
         d.toString().split('\n').forEach(line => {
-          if (line.trim()) win.webContents.send('ps:error', line)
+          if (line.trim()) winRef.current?.webContents.send('ps:error', line)
         })
       })
       proc.on('close', (code) => {
@@ -970,7 +983,7 @@ function registerIpcHandlers(win) {
     // parseResult must NOT re-send or each line would appear twice in the terminal.
     if (psSession.alive && !hasExo && !hasIpps) {
       logger.info('IPC: policies:create — using persistent session (no re-auth)')
-      win.webContents.send('ps:output', 'CONNECTED: Using active tenant session — deploying policies...')
+      winRef.current?.webContents.send('ps:output', 'CONNECTED: Using active tenant session — deploying policies...')
       const script = buildPoliciesScript(policies, prefix || '', policyConfigs || {})
       await psSession.run(script, parseResult, 300000)
       return { logs, results }
@@ -982,8 +995,8 @@ function registerIpcHandlers(win) {
     const script = buildScript(policies, credentials, prefix, authMode, policyConfigs || {}, { useDeviceCode })
     await runScript(
       script,
-      (line) => { win.webContents.send('ps:output', line); parseResult(line) },
-      (line) => win.webContents.send('ps:error', line)
+      (line) => { winRef.current?.webContents.send('ps:output', line); parseResult(line) },
+      (line) => winRef.current?.webContents.send('ps:error', line)
     )
 
     return { logs, results }
@@ -1070,7 +1083,7 @@ try {
           if (line === 'POLICY_JSON_START') { inJsonBlock = true; return }
           if (line === 'POLICY_JSON_END') { inJsonBlock = false; return }
           if (!inJsonBlock && line.trim()) {
-            win.webContents.send('ps:output', line)
+            winRef.current?.webContents.send('ps:output', line)
           }
         },
         90000
