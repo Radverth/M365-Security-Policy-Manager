@@ -181,9 +181,14 @@ const ADMIN_ROLES_PS = ADMIN_ROLES.map(r => `'${r}'`).join(', ')
 function buildCAScript(policy, config, prefix) {
   const displayName = dn(policy, prefix)
   const state = config.state || 'enabled'
-  const excGrps = psArr(config.excludeGroups)
-  const hasExc = hasItems(config.excludeGroups)
-  const excClause = hasExc ? `; ExcludeGroups = ${excGrps}` : ''
+  const excGrps  = psArr(config.excludeGroups)
+  const excUsrs  = psArr(config.excludeUsers)
+  const hasExcG  = hasItems(config.excludeGroups)
+  const hasExcU  = hasItems(config.excludeUsers)
+  const excClause = [
+    hasExcG ? `; ExcludeGroups = ${excGrps}` : '',
+    hasExcU ? `; ExcludeUsers = ${excUsrs}` : '',
+  ].join('')
 
   // Shorthand condition builders
   const allUsers = () => `@{ IncludeUsers = @('All')${excClause} }`

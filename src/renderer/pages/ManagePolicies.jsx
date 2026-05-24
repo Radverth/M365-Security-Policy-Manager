@@ -89,18 +89,82 @@ function SummaryRow({ label, value }) {
   )
 }
 
+const GRANT_OPTIONS = [
+  { value: 'mfa',                  label: 'Require MFA' },
+  { value: 'compliantDevice',      label: 'Require Compliant Device' },
+  { value: 'domainJoinedDevice',   label: 'Require Hybrid AD Join' },
+  { value: 'approvedApplication',  label: 'Require Approved App' },
+  { value: 'compliantApplication', label: 'Require App Protection' },
+  { value: 'passwordChange',       label: 'Require Password Change' },
+  { value: 'block',                label: 'Block Access' },
+]
+
 function PolicyEditor({ policy, onSave, onCancel, saving }) {
   const [name, setName] = React.useState(pick(policy,'DisplayName','displayName') || '')
   const [state, setState] = React.useState(pick(policy,'State','state') || 'enabled')
 
-  const cond = pick(policy,'Conditions','conditions') || {}
+  const cond     = pick(policy,'Conditions','conditions') || {}
+  const condUsers = pick(cond,'Users','users') || {}
+  const grant    = pick(policy,'GrantControls','grantControls') || {}
+  const hasAuthStrength = !!(pick(grant,'AuthenticationStrength','authenticationStrength'))
+
+  const initExcGrps  = (pick(condUsers,'ExcludeGroups','excludeGroups') || []).join(', ')
+  const initExcUsers = (pick(condUsers,'ExcludeUsers','excludeUsers') || []).join(', ')
+  const initControls = new Set(pick(grant,'BuiltInControls','builtInControls') || [])
+  const initOperator = pick(grant,'Operator','operator') || 'OR'
+
+  const [excludeGroups,   setExcludeGroups]   = React.useState(initExcGrps)
+  const [excludeUsers,    setExcludeUsers]     = React.useState(initExcUsers)
+  const [selectedControls,setSelectedControls] = React.useState(initControls)
+  const [operator,        setOperator]         = React.useState(initOperator)
+
   const sessionStr = fmtSession(pick(policy,'SessionControls','sessionControls'))
-  const inputCls = 'block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy'
+  const inputCls   = 'block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy'
+
+  const toggleControl = (ctrl) => setSelectedControls(s => {
+    const ns = new Set(s); ns.has(ctrl) ? ns.delete(ctrl) : ns.add(ctrl); return ns
+  })
+
+  const handleSave = () => {
+    const excGrpIds  = excludeGroups.split(',').map(s => s.trim()).filter(Boolean)
+    const excUserIds = excludeUsers.split(',').map(s => s.trim()).filter(Boolean)
+
+    // Preserve existing user inclusions so the PATCH doesn't wipe them
+    const incUsers  = pick(condUsers,'IncludeUsers','includeUsers') || []
+    const incGroups = pick(condUsers,'IncludeGroups','includeGroups') || []
+    const incRoles  = pick(condUsers,'IncludeRoles','includeRoles') || []
+    const excRoles  = pick(condUsers,'ExcludeRoles','excludeRoles') || []
+    const incGuests = pick(condUsers,'IncludeGuestsOrExternalUsers','includeGuestsOrExternalUsers')
+
+    const usersObj = {}
+    if (incUsers.length)  usersObj.includeUsers  = incUsers
+    if (incGroups.length) usersObj.includeGroups = incGroups
+    if (incRoles.length)  usersObj.includeRoles  = incRoles
+    if (excRoles.length)  usersObj.excludeRoles  = excRoles
+    if (incGuests)        usersObj.includeGuestsOrExternalUsers = incGuests
+    if (excGrpIds.length)  usersObj.excludeGroups = excGrpIds
+    if (excUserIds.length) usersObj.excludeUsers  = excUserIds
+
+    const patch = {
+      displayName: name,
+      state,
+      conditions: { users: usersObj },
+    }
+
+    if (!hasAuthStrength) {
+      patch.grantControls = selectedControls.size > 0
+        ? { operator, builtInControls: [...selectedControls] }
+        : null
+    }
+
+    onSave(patch)
+  }
 
   return (
     <div className="pt-2 pb-4 space-y-5">
-      <div className="space-y-4">
-        <div>
+      {/* ── Name & State ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="col-span-2">
           <label className="block text-xs font-medium text-gray-600 mb-1">Display Name</label>
           <input className={inputCls} value={name} onChange={e => setName(e.target.value)} />
         </div>
@@ -114,20 +178,86 @@ function PolicyEditor({ policy, onSave, onCancel, saving }) {
         </div>
       </div>
 
+      {/* ── Grant Controls ───────────────────────────────────────────────── */}
       <div>
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Policy conditions (read-only)</p>
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Grant Controls</p>
+        {hasAuthStrength ? (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+            This policy uses an Authentication Strength — edit grant controls in the Entra portal.
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 mb-3">
+              {GRANT_OPTIONS.map(opt => (
+                <label key={opt.value} className="flex items-center gap-2 text-xs cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={selectedControls.has(opt.value)}
+                    onChange={() => toggleControl(opt.value)}
+                    className="h-3.5 w-3.5 rounded border-gray-300 text-navy"
+                  />
+                  <span className="text-gray-700">{opt.label}</span>
+                </label>
+              ))}
+            </div>
+            {selectedControls.size > 1 && (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-xs text-gray-500">Require</span>
+                <select
+                  className="text-xs rounded border border-gray-300 px-2 py-1 focus:border-navy focus:outline-none"
+                  value={operator}
+                  onChange={e => setOperator(e.target.value)}
+                >
+                  <option value="OR">any one of the selected (OR)</option>
+                  <option value="AND">all of the selected (AND)</option>
+                </select>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* ── User Exclusions ──────────────────────────────────────────────── */}
+      <div>
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">User Exclusions</p>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Exclude Groups</label>
+            <input
+              className={inputCls}
+              value={excludeGroups}
+              onChange={e => setExcludeGroups(e.target.value)}
+              placeholder="Group Object IDs, comma-separated"
+            />
+            <p className="text-xs text-gray-400 mt-1">Azure AD Group Object IDs to exclude from this policy</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Exclude Users</label>
+            <input
+              className={inputCls}
+              value={excludeUsers}
+              onChange={e => setExcludeUsers(e.target.value)}
+              placeholder="User Object IDs, comma-separated"
+            />
+            <p className="text-xs text-gray-400 mt-1">User Object IDs to exclude (e.g. break-glass accounts)</p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Read-only summary ────────────────────────────────────────────── */}
+      <div>
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Other Conditions (read-only)</p>
         <div className="rounded-lg border border-gray-200 bg-gray-50 divide-y divide-gray-100">
-          <SummaryRow label="Users" value={fmtUsers(pick(cond,'Users','users'))} />
+          <SummaryRow label="Users" value={fmtUsers(condUsers)} />
           <SummaryRow label="Applications" value={fmtApps(pick(cond,'Applications','applications'))} />
-          <SummaryRow label="Grant Controls" value={fmtGrant(pick(policy,'GrantControls','grantControls'))} />
           {sessionStr && <SummaryRow label="Session Controls" value={sessionStr} />}
         </div>
-        <p className="text-xs text-gray-400 mt-2">To change conditions or grant controls, edit in the Entra portal.</p>
+        <p className="text-xs text-gray-400 mt-2">To change user inclusions, applications, or session controls, edit in the Entra portal.</p>
       </div>
 
       <div className="flex justify-end gap-2 pt-1">
         <Button variant="secondary" onClick={onCancel}>Cancel</Button>
-        <Button variant="primary" onClick={() => onSave({ displayName: name, state })} loading={saving}>
+        <Button variant="primary" onClick={handleSave} loading={saving}>
           Save Changes
         </Button>
       </div>
@@ -409,15 +539,16 @@ export default function ManagePolicies() {
     setSaveLoading(true)
     try {
       await window.api.policies.update(editTarget.Id, patch)
-      // Update local state — policies use PascalCase from PowerShell
-      setPolicies(ps => ps.map(p => p.Id === editTarget.Id
-        ? {
-            ...p,
-            ...(patch.displayName !== undefined && { DisplayName: patch.displayName }),
-            ...(patch.state !== undefined && { State: patch.state }),
-          }
-        : p
-      ))
+      setPolicies(ps => ps.map(p => {
+        if (p.Id !== editTarget.Id) return p
+        return {
+          ...p,
+          ...(patch.displayName !== undefined && { DisplayName: patch.displayName }),
+          ...(patch.state       !== undefined && { State: patch.state }),
+          ...(patch.conditions  !== undefined && { Conditions: { ...p.Conditions, ...patch.conditions } }),
+          ...(patch.grantControls !== undefined && { GrantControls: patch.grantControls }),
+        }
+      }))
       addNotification('Policy updated', 'success')
       setEditTarget(null)
     } catch (err) {

@@ -174,6 +174,11 @@ const _excludeGroups = {
   hint: 'Comma-separated Azure AD Group Object IDs to exclude from this policy',
 }
 
+const _excludeUsers = {
+  key: 'excludeUsers', label: 'Exclude Users', type: 'text', default: '',
+  hint: 'Comma-separated User Object IDs to exclude (e.g. break-glass accounts)',
+}
+
 const _assignedGroups = {
   key: 'assignedGroups', label: 'Assigned Groups', type: 'text', default: '',
   hint: 'Comma-separated group names or Object IDs (leave blank for all devices/users)',
@@ -185,7 +190,7 @@ const _notifEmail = {
 }
 
 export const CATEGORY_FIELDS = {
-  'Conditional Access':    [_stateCA, _excludeGroups],
+  'Conditional Access':    [_stateCA, _excludeGroups, _excludeUsers],
   'Identity Protection':   [_stateSimple, _notifEmail],
   'Exchange Online':       [_stateSimple],
   'SharePoint & OneDrive': [_stateSimple],
