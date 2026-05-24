@@ -97,7 +97,7 @@ contextBridge.exposeInMainWorld('api', {
   report: {
     audit: () => ipcRenderer.invoke('report:audit'),
     savePDF: (orgName, policies, nameMap, recommendations) => ipcRenderer.invoke('app:savePDF', orgName, policies, nameMap, recommendations),
-    saveDocx: (orgName, policies, nameMap, recommendations) => ipcRenderer.invoke('app:saveDocx', orgName, policies, nameMap, recommendations),
+    saveDocx: (orgName, policies, nameMap, recommendations, accountManager) => ipcRenderer.invoke('app:saveDocx', orgName, policies, nameMap, recommendations, accountManager),
   },
 
   // Tenant entity search (used by EntityPicker in the editor UI)

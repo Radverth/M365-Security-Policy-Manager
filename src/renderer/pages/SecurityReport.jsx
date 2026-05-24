@@ -589,12 +589,20 @@ function AffinityReportHeader({ orgName, date }) {
   )
 }
 
+// ── Account managers ──────────────────────────────────────────────────────────
+const ACCOUNT_MANAGERS = [
+  { name: 'David Capel',     email: 'david.capel@affinityit.co.uk' },
+  { name: 'David Pearson',   email: 'david.pearson@affinityit.co.uk' },
+  { name: 'Elliot Armitage', email: 'elliot.armitage@affinityit.co.uk' },
+]
+
 // ── Report view ───────────────────────────────────────────────────────────────
 
 function ReportView({ orgName, tenantPolicies, nameMap = {}, date, selectedBaselines = null }) {
   const [savingPDF, setSavingPDF] = useState(false)
   const [savingDocx, setSavingDocx] = useState(false)
   const [savedPath, setSavedPath] = useState(null)
+  const [accountManager, setAccountManager] = useState(ACCOUNT_MANAGERS[0])
   const enabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabled').length
   const reportOnly = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabledForReportingButNotEnforced').length
   const disabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'disabled').length
@@ -621,7 +629,7 @@ function ReportView({ orgName, tenantPolicies, nameMap = {}, date, selectedBasel
     setSavingDocx(true)
     setSavedPath(null)
     try {
-      const result = await window.api.report.saveDocx(orgName, tenantPolicies, nameMap, recommendations)
+      const result = await window.api.report.saveDocx(orgName, tenantPolicies, nameMap, recommendations, accountManager)
       if (result?.path) {
         setSavedPath('docx')
         setTimeout(() => setSavedPath(null), 5000)
@@ -644,7 +652,29 @@ function ReportView({ orgName, tenantPolicies, nameMap = {}, date, selectedBasel
           <span className="text-sm font-semibold text-gray-800">{orgName}</span>
           <span className="text-sm text-gray-400">&mdash; {tenantPolicies.length} policies</span>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-3">
+          {/* Account manager selector */}
+          <div className="flex items-center gap-2 border-r border-gray-200 pr-3">
+            <span className="text-xs text-gray-400 whitespace-nowrap">Account Manager</span>
+            <div className="flex rounded-md border border-gray-200 overflow-hidden text-xs">
+              {ACCOUNT_MANAGERS.map(am => (
+                <button
+                  key={am.email}
+                  onClick={() => setAccountManager(am)}
+                  title={am.email}
+                  className={[
+                    'px-2.5 py-1.5 font-medium transition-colors border-r border-gray-200 last:border-0 whitespace-nowrap',
+                    accountManager.email === am.email
+                      ? 'bg-navy text-white'
+                      : 'bg-white text-gray-600 hover:bg-gray-50',
+                  ].join(' ')}
+                >
+                  {am.name.split(' ').map((w, i) => i === 0 ? w : w[0]).join(' ')}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {savedPath && (
             <span className="text-xs text-emerald-600 font-medium">
               {savedPath === 'pdf' ? 'PDF saved' : 'Word doc saved'}
