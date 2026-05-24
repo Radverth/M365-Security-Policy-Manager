@@ -1,6 +1,25 @@
 const { autoUpdater } = require('electron-updater')
 const { ipcMain } = require('electron')
 
+const NETWORK_PATTERNS = [
+  'ERR_NETWORK_CHANGED', 'ERR_INTERNET_DISCONNECTED', 'ERR_NAME_NOT_RESOLVED',
+  'ERR_CONNECTION_REFUSED', 'ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT',
+]
+
+function classifyError(err) {
+  const msg = err?.message || String(err)
+  if (NETWORK_PATTERNS.some(p => msg.includes(p))) {
+    return 'Could not reach the update server — check your internet connection and try again.'
+  }
+  if (msg.includes('Cannot parse releases feed') || msg.includes('Unable to find latest version')) {
+    return 'Could not retrieve release information from GitHub. This is usually a temporary network issue — please try again shortly.'
+  }
+  if (msg.includes('ENOENT') || msg.includes('no such file')) {
+    return 'Update file could not be found. Please download the latest version manually.'
+  }
+  return 'An error occurred while checking for updates. Please try again later.'
+}
+
 function setupAutoUpdater(win, isDev) {
   const send = (channel, payload) => {
     if (!win.isDestroyed()) win.webContents.send(channel, payload)
@@ -37,7 +56,24 @@ function setupAutoUpdater(win, isDev) {
 
   autoUpdater.on('update-not-available', () => send('updater:not-available'))
 
-  autoUpdater.on('error', (err) => send('updater:error', err.message))
+  let retryScheduled = false
+  autoUpdater.on('error', (err) => {
+    const friendly = classifyError(err)
+    const isNetworkError = NETWORK_PATTERNS.some(p => (err?.message || '').includes(p))
+
+    // For transient network errors on the background startup check, retry once
+    // after 60 s without surfacing an error to the user.
+    if (isNetworkError && !retryScheduled) {
+      retryScheduled = true
+      setTimeout(() => {
+        retryScheduled = false
+        autoUpdater.checkForUpdates().catch(() => {})
+      }, 60_000)
+      return
+    }
+
+    send('updater:error', friendly)
+  })
 
   autoUpdater.on('download-progress', (p) => {
     send('updater:progress', {
@@ -57,7 +93,7 @@ function setupAutoUpdater(win, isDev) {
       const result = await autoUpdater.checkForUpdates()
       return result ?? {}
     } catch (err) {
-      return { error: err.message }
+      return { error: classifyError(err) }
     }
   })
 
