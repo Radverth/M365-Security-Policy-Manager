@@ -481,6 +481,19 @@ function generateDocxHtml(orgName, policies, date, nameMap = {}, recommendations
   // html-to-docx ignores cell background — use dark text on light background so headers stay visible
   const TH   = `background-color:#e5eaf0;color:${NAV};padding:8px 10px;font-size:10pt;font-weight:700;text-align:left;border-bottom:2px solid ${NAV}`
 
+  // ── Header image (embedded as base64 so it works in both dev and packaged) ──
+  let headerImgTag = ''
+  try {
+    const imgPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'assets/affinity-header.png')
+      : path.join(__dirname, '../../assets/affinity-header.png')
+    const b64 = fs.readFileSync(imgPath).toString('base64')
+    headerImgTag = `<img src="data:image/png;base64,${b64}" width="648" style="display:block;width:648px;margin-bottom:28px">`
+  } catch {
+    // fallback: render brand as text if image missing
+    headerImgTag = `<table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin-bottom:32px"><tr><td style="border-top:8px solid ${GOLD};font-size:1pt">&nbsp;</td></tr></table><p style="font-size:38pt;font-weight:200;color:${NAV};margin:0;line-height:1">affinity</p><p style="font-size:9pt;color:${GOLD};margin:6px 0 0 0">TECHNOLOGY. TOGETHER.</p>`
+  }
+
   function sectionHeading(text) {
     return `<table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin:28px 0 10px 0"><tr><td style="padding:0 0 6px 0;font-size:14pt;font-weight:700;color:${NAV};border-bottom:3px solid ${GOLD}">${text}</td></tr></table>`
   }
@@ -600,7 +613,10 @@ function generateDocxHtml(orgName, policies, date, nameMap = {}, recommendations
     }).join('')
     return `
 <table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin:20px 0 4px 0">
-  <tr><td style="padding:0 0 5px 0;font-size:12pt;font-weight:700;color:${NAV};border-bottom:2px solid ${GOLD}">${esc(r.name)} &mdash; <span style="color:${pctColor}">${pct}% compliant</span></td></tr>
+  <tr>
+    <td style="padding:0 0 5px 0;font-size:12pt;font-weight:700;color:${NAV};border-bottom:2px solid ${GOLD}">${esc(r.name)} &mdash;</td>
+    <td style="padding:0 0 5px 8px;font-size:12pt;font-weight:700;color:${pctColor};border-bottom:2px solid ${GOLD};white-space:nowrap;width:1%">${pct}% compliant</td>
+  </tr>
 </table>
 <p style="font-size:10pt;color:#6b7280;margin:4px 0 8px 0">${esc(r.description || '')}</p>
 <table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin-bottom:12px">
@@ -648,17 +664,11 @@ ${r.unverifiableCount > 0 ? `<p style="font-size:9pt;color:#9ca3af;font-style:it
 
 <!-- ═══ COVER ════════════════════════════════════════════════════════════════ -->
 
-<!-- Gold accent line at top (border works; background on narrow rows does not) -->
-<table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin-bottom:32px">
-  <tr><td style="border-top:8px solid ${GOLD};font-size:1pt">&nbsp;</td></tr>
-</table>
-
-<!-- Brand -->
-<p style="font-size:38pt;font-weight:200;color:${NAV};margin:0;line-height:1">affinity</p>
-<p style="font-size:9pt;color:${GOLD};margin:6px 0 0 0">TECHNOLOGY. TOGETHER.</p>
+<!-- Affinity IT header image -->
+${headerImgTag}
 
 <!-- Report title -->
-<table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin-top:52px">
+<table border="0" cellpadding="0" cellspacing="0" width="648" style="border-collapse:collapse;margin-top:40px">
   <tr><td style="padding:0 0 4px 0"><p style="font-size:8pt;font-weight:700;color:#9ca3af;margin:0">MICROSOFT 365 SECURITY ASSESSMENT</p></td></tr>
   <tr><td style="padding:4px 0 8px 0"><p style="font-size:30pt;font-weight:700;color:${NAV};margin:0;line-height:1.1">${esc(orgName || 'Tenant Report')}</p></td></tr>
   <tr><td style="padding:0 0 40px 0"><p style="font-size:11pt;color:#6b7280;margin:0">${esc(date)}</p></td></tr>
