@@ -19,11 +19,17 @@ const _STRIP_KEYS = new Set(['AdditionalProperties', 'BackingStore'])
 function cleanForGraph(v) {
   if (Array.isArray(v)) return v.map(cleanForGraph)
   if (v && typeof v === 'object') {
-    return Object.fromEntries(
+    // AdditionalProperties holds Graph OData metadata (e.g. @odata.type for polymorphic
+    // types like ExternalTenants). Merge its contents in rather than discarding them.
+    const extra = (v.AdditionalProperties && typeof v.AdditionalProperties === 'object')
+      ? v.AdditionalProperties : {}
+    const cleaned = Object.fromEntries(
       Object.entries(v)
-        .filter(([k]) => !_STRIP_KEYS.has(k) && (k === '@odata.type' || !k.startsWith('@')))
+        .filter(([k]) => !_STRIP_KEYS.has(k) && !k.startsWith('@'))
         .map(([k, val]) => [k.charAt(0).toLowerCase() + k.slice(1), cleanForGraph(val)])
+        .filter(([, val]) => val !== null && val !== undefined)
     )
+    return { ...cleaned, ...extra }
   }
   return v
 }
@@ -115,7 +121,7 @@ const GRANT_OPTIONS = [
   { value: 'block',                label: 'Block Access' },
 ]
 
-function PolicyEditor({ policy, onSave, onCancel, saving }) {
+function PolicyEditor({ policy, onSave, onCancel, saving, noSession }) {
   const [name, setName] = React.useState(pick(policy,'DisplayName','displayName') || '')
   const [state, setState] = React.useState(pick(policy,'State','state') || 'enabled')
 
@@ -247,6 +253,7 @@ function PolicyEditor({ policy, onSave, onCancel, saving }) {
               type="groups"
               selected={excludeGroups}
               onChange={setExcludeGroups}
+              noSession={noSession}
             />
           </div>
           <div>
@@ -255,6 +262,7 @@ function PolicyEditor({ policy, onSave, onCancel, saving }) {
               type="users"
               selected={excludeUsers}
               onChange={setExcludeUsers}
+              noSession={noSession}
             />
           </div>
         </div>
@@ -633,6 +641,7 @@ export default function ManagePolicies() {
           onSave={handleSaveEdit}
           onCancel={() => setEditTarget(null)}
           saving={saveLoading}
+          noSession={!effectiveSession}
         />
       </Modal>
     </div>

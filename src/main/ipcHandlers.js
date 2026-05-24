@@ -470,37 +470,43 @@ function generateDocxHtml(orgName, policies, date, nameMap = {}, recommendations
   const stateOf = p => p.State || p.state || 'unknown'
   const stateLabel = s => ({ enabled: 'Enabled', disabled: 'Disabled', enabledForReportingButNotEnforced: 'Report Only' }[s] || 'Unknown')
 
-  function pageBreak() {
-    return `<p style="page-break-before:always;break-before:page;margin:0;">&nbsp;</p>`
-  }
-
-  // Try to embed the Affinity IT cover JPEG as base64; fall back to styled text.
+  // Try PNG first (better html-to-docx support), fall back to JPEG, then text.
+  // Image must be in a <p> tag — html-to-docx only processes images in paragraph context.
   let coverImgHtml
-  try {
-    const imgPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'assets/affinity_it_services_ltd_cover.jpeg')
-      : path.join(__dirname, '../../assets/affinity_it_services_ltd_cover.jpeg')
-    const imgData = fs.readFileSync(imgPath)
-    const imgBase64 = imgData.toString('base64')
-    // Calculate height to maintain aspect ratio at width=648 by parsing JPEG SOF marker
-    let imgHeight = 162 // fallback: correct for the 1585×397 cover image
-    for (let i = 0; i < imgData.length - 8;) {
-      if (imgData[i] === 0xFF) {
-        const marker = imgData[i + 1]
-        if (marker >= 0xC0 && marker <= 0xC3) {
-          const h = (imgData[i + 5] << 8) | imgData[i + 6]
-          const w = (imgData[i + 7] << 8) | imgData[i + 8]
-          if (w > 0) imgHeight = Math.round(648 * h / w)
-          break
-        }
-        if (marker === 0xD8 || marker === 0xD9) { i += 2; continue }
-        const segLen = (imgData[i + 2] << 8) | imgData[i + 3]
-        i += 2 + segLen
-      } else i++
+  const _tryImg = (imgPath, mime, defaultH, defaultW) => {
+    const data = fs.readFileSync(imgPath)
+    const b64  = data.toString('base64')
+    let h = defaultH, w = defaultW
+    if (mime === 'image/jpeg') {
+      for (let i = 0; i < data.length - 8;) {
+        if (data[i] === 0xFF) {
+          const m = data[i + 1]
+          if (m >= 0xC0 && m <= 0xC3) {
+            h = (data[i + 5] << 8) | data[i + 6]
+            w = (data[i + 7] << 8) | data[i + 8]
+            break
+          }
+          if (m === 0xD8 || m === 0xD9) { i += 2; continue }
+          i += 2 + ((data[i + 2] << 8) | data[i + 3])
+        } else i++
+      }
+    } else if (mime === 'image/png') {
+      // PNG IHDR: bytes 16-24 (w then h, big-endian uint32)
+      w = (data[16] << 24) | (data[17] << 16) | (data[18] << 8) | data[19]
+      h = (data[20] << 24) | (data[21] << 16) | (data[22] << 8) | data[23]
     }
-    coverImgHtml = `<img src="data:image/jpeg;base64,${imgBase64}" width="648" height="${imgHeight}" style="display:block;margin-bottom:16px" />`
+    const scaledH = w > 0 ? Math.round(648 * h / w) : defaultH
+    return `<p style="margin:0;padding:0"><img src="data:${mime};base64,${b64}" width="648" height="${scaledH}" /></p>`
+  }
+  const base = app.isPackaged ? process.resourcesPath : path.join(__dirname, '../..')
+  try {
+    coverImgHtml = _tryImg(path.join(base, 'assets/affinity-header.png'), 'image/png', 280, 1296)
   } catch {
-    coverImgHtml = `<div style="border-top:6px solid #E8A830;padding-top:12px;margin-bottom:16px"><div style="font-size:38pt;font-weight:200;color:#1a2d4a;letter-spacing:-2px;line-height:1">Affinity IT</div><div style="font-size:11pt;color:#E8A830;margin-top:6px;letter-spacing:1px">Technology. Together.</div></div>`
+    try {
+      coverImgHtml = _tryImg(path.join(base, 'assets/affinity_it_services_ltd_cover.jpeg'), 'image/jpeg', 397, 1585)
+    } catch {
+      coverImgHtml = `<p style="font-size:38pt;font-weight:200;color:#1a2d4a;border-top:6px solid #E8A830;padding-top:12px;margin-bottom:4px">Affinity IT</p><p style="font-size:11pt;color:#E8A830;letter-spacing:1px;margin-bottom:16px">Technology. Together.</p>`
+    }
   }
 
   // ── Policy descriptions for the gap analysis section ────────────────────────
@@ -676,35 +682,22 @@ strong { color: #1a2d4a; }
 <body>
 
 <!-- ═══ COVER ════════════════════════════════════════════════════════════════ -->
-<div style="padding-top:8px;margin-bottom:48px">
-
 ${coverImgHtml}
-
-  <div style="margin-top:52px">
-    <div style="font-size:9pt;font-weight:700;color:#9ca3af;letter-spacing:2px">MICROSOFT 365 SECURITY POLICY REPORT</div>
-    <div style="font-size:28pt;font-weight:700;color:#1a2d4a;line-height:1.2;margin-top:8px">${esc(orgName || 'Tenant')}</div>
-    <div style="font-size:11pt;color:#6b7280;margin-top:8px">${esc(date)}</div>
-  </div>
-
-  <table style="width:100%;border-collapse:collapse;margin-top:52px">
-    <tr>
-      <td style="background:#E8A830;padding:0 0 0 0;font-size:1pt">&nbsp;</td>
-    </tr>
-    <tr>
-      <td style="padding:16px 20px;background:#f8fafc;font-size:10pt;color:#374151">
-        <strong>Confidential</strong> — Prepared by Affinity IT for <strong>${esc(orgName || 'your organisation')}</strong>.
-        This report provides a full analysis of your Microsoft 365 Conditional Access security configuration, identifies gaps against
-        Microsoft&rsquo;s recommended security baselines, and sets out a prioritised action plan.
-      </td>
-    </tr>
-  </table>
-
-</div>
-
-${pageBreak()}
+<p style="font-size:9pt;font-weight:700;color:#9ca3af;letter-spacing:2px;margin-top:48px;margin-bottom:0">MICROSOFT 365 SECURITY POLICY REPORT</p>
+<p style="font-size:28pt;font-weight:700;color:#1a2d4a;line-height:1.2;margin-top:8px;margin-bottom:0">${esc(orgName || 'Tenant')}</p>
+<p style="font-size:11pt;color:#6b7280;margin-top:8px;margin-bottom:0">${esc(date)}</p>
+<table style="width:100%;border-collapse:collapse;margin-top:48px;margin-bottom:0">
+  <tr>
+    <td style="border:1px solid #e5e7eb;border-top:4px solid #E8A830;padding:14px 18px;font-size:10pt;color:#374151">
+      <strong>Confidential</strong> — Prepared by Affinity IT for <strong>${esc(orgName || 'your organisation')}</strong>.
+      This report provides a full analysis of your Microsoft 365 Conditional Access security configuration, identifies gaps against
+      Microsoft&rsquo;s recommended security baselines, and sets out a prioritised action plan.
+    </td>
+  </tr>
+</table>
 
 <!-- ═══ EXECUTIVE SUMMARY ═══════════════════════════════════════════════════ -->
-<h2 style="font-size:14pt;font-weight:700;color:#1a2d4a;margin:32px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Executive Summary</h2>
+<h2 style="page-break-before:always;font-size:14pt;font-weight:700;color:#1a2d4a;margin:24px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Executive Summary</h2>
 <p>This report documents the Conditional Access policy configuration for <strong>${esc(orgName || 'your organisation')}</strong>
 as of <strong>${esc(date)}</strong>. Conditional Access is the enforcement layer in Microsoft Entra ID that controls who can
 access cloud applications, from which devices and locations, and under what conditions.</p>
@@ -748,10 +741,8 @@ Each baseline represents a curated set of policies addressing a specific securit
   <tbody>${baselineSummaryRows}</tbody>
 </table>
 
-${pageBreak()}
-
 <!-- ═══ GAP ANALYSIS ═════════════════════════════════════════════════════════ -->
-<h2 style="font-size:14pt;font-weight:700;color:#1a2d4a;margin:32px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Gap Analysis &amp; Recommendations</h2>
+<h2 style="page-break-before:always;font-size:14pt;font-weight:700;color:#1a2d4a;margin:24px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Gap Analysis &amp; Recommendations</h2>
 <p>The following section details each missing policy, its business risk, and the specific protection it provides. These findings form the
 basis of the recommended action plan. Policies are matched by ID in their display name <em>or</em> by their configuration, so
 any existing policy with the correct settings is detected regardless of its name.</p>
@@ -759,10 +750,8 @@ any existing policy with the correct settings is detected regardless of its name
 ${gapSections || '<p style="color:#15803d;font-weight:700">&#10003; No gaps identified — all selected baseline policies are present.</p>'}
 
 ${allMissing.length > 0 ? `
-${pageBreak()}
-
 <!-- ═══ ACTION PLAN ══════════════════════════════════════════════════════════ -->
-<h2 style="font-size:14pt;font-weight:700;color:#1a2d4a;margin:32px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Recommended Action Plan</h2>
+<h2 style="page-break-before:always;font-size:14pt;font-weight:700;color:#1a2d4a;margin:24px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Recommended Action Plan</h2>
 <p>The table below consolidates all recommended policies across the selected baselines, ordered by priority. Affinity IT
 can assist with the design, testing (Report Only mode), and phased enforcement of these policies in your environment.</p>
 
@@ -793,10 +782,8 @@ can assist with the design, testing (Report Only mode), and phased enforcement o
 ` : ''}
 ` : ''}
 
-${pageBreak()}
-
 <!-- ═══ POLICY INVENTORY ══════════════════════════════════════════════════════ -->
-<h2 style="font-size:14pt;font-weight:700;color:#1a2d4a;margin:32px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Conditional Access Policy Inventory</h2>
+<h2 style="page-break-before:always;font-size:14pt;font-weight:700;color:#1a2d4a;margin:24px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Conditional Access Policy Inventory</h2>
 <p>The following table lists all ${policies.length} Conditional Access ${policies.length === 1 ? 'policy' : 'policies'} currently configured in your tenant.</p>
 
 <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
@@ -1293,8 +1280,6 @@ Write-Output "NAME_MAP_END"`,
     if (!psSession.alive) return { items: [], error: 'No active session' }
     const safeQ = safe(query || '')
     if (!safeQ) return { items: [] }
-    // Use $search (substring match) across displayName and UPN — two separate requests
-    // then deduplicate. $search requires ConsistencyLevel:eventual and $count=true.
     const script = `
 try {
   $q = '${safeQ}'
@@ -1311,15 +1296,21 @@ try {
   $result = @($combined | Select-Object -First 15 | ForEach-Object {
     @{ id = $_.id; displayName = $_.displayName; mail = if ($_.mail) { $_.mail } else { $_.userPrincipalName } }
   })
-  if ($result.Count -eq 0) { '[]' } else { $result | ConvertTo-Json -Compress }
+  Write-Output 'SEARCH_JSON_START'
+  if ($result.Count -eq 0) { Write-Output '[]' } else { Write-Output ($result | ConvertTo-Json -Compress) }
+  Write-Output 'SEARCH_JSON_END'
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
 }`
     const output = await psSession.run(script)
     const errorLine = output.split('\n').find(l => l.startsWith('ERROR:'))
     if (errorLine) return { items: [], error: errorLine.slice(6).trim() }
+    const lines = output.split('\n')
+    const s = lines.indexOf('SEARCH_JSON_START')
+    const e = lines.indexOf('SEARCH_JSON_END')
+    if (s === -1 || e <= s) return { items: [] }
     try {
-      const items = JSON.parse(output.trim() || '[]')
+      const items = JSON.parse(lines.slice(s + 1, e).join('').trim() || '[]')
       return { items: Array.isArray(items) ? items : [items] }
     } catch {
       return { items: [] }
@@ -1338,15 +1329,21 @@ try {
   $result = @($resp.value | Where-Object { $_ } | ForEach-Object {
     @{ id = $_.id; displayName = $_.displayName; description = $_.description }
   })
-  if ($result.Count -eq 0) { '[]' } else { $result | ConvertTo-Json -Compress }
+  Write-Output 'SEARCH_JSON_START'
+  if ($result.Count -eq 0) { Write-Output '[]' } else { Write-Output ($result | ConvertTo-Json -Compress) }
+  Write-Output 'SEARCH_JSON_END'
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
 }`
     const output = await psSession.run(script)
     const errorLine = output.split('\n').find(l => l.startsWith('ERROR:'))
     if (errorLine) return { items: [], error: errorLine.slice(6).trim() }
+    const lines = output.split('\n')
+    const s = lines.indexOf('SEARCH_JSON_START')
+    const e = lines.indexOf('SEARCH_JSON_END')
+    if (s === -1 || e <= s) return { items: [] }
     try {
-      const items = JSON.parse(output.trim() || '[]')
+      const items = JSON.parse(lines.slice(s + 1, e).join('').trim() || '[]')
       return { items: Array.isArray(items) ? items : [items] }
     } catch {
       return { items: [] }
