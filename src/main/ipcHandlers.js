@@ -1469,30 +1469,31 @@ function registerIpcHandlers(win) {
     const safeId = safe(id)
     const b64 = Buffer.from(JSON.stringify(patch)).toString('base64')
     const script = `
-try {
-  $body = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64}'))
-  Invoke-MgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies/${safeId}" -Body $body -ContentType 'application/json' | Out-Null
-  Write-Output "SUCCESS"
-} catch {
-  $errMsg = $_.Exception.Message
-  $errDetails = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { '' }
-  if ($errMsg -match '403|Forbidden') {
-    Write-Output "ERROR_403: $errDetails"
-  } else {
-    Write-Output "ERROR: $errMsg$(if ($errDetails) { ' | ' + $errDetails } else { '' })"
+$ctx = Get-MgContext
+$scopes = if ($ctx -and $ctx.Scopes) { @($ctx.Scopes) } else { @() }
+if (-not ($scopes -contains 'Policy.ReadWrite.ConditionalAccess')) {
+  Write-Output "ERROR_NO_SCOPE: Token lacks Policy.ReadWrite.ConditionalAccess. Disconnect and reconnect — you will be prompted for a new device code to re-authenticate with the correct permissions."
+} else {
+  try {
+    $body = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64}'))
+    Invoke-MgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies/${safeId}" -Body $body -ContentType 'application/json' | Out-Null
+    Write-Output "SUCCESS"
+  } catch {
+    $errMsg = $_.Exception.Message
+    $errDetails = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { '' }
+    if ($errMsg -match '403|Forbidden') {
+      Write-Output "ERROR_403_ROLE: Token has the required scope but the signed-in account lacks the Conditional Access Administrator or Global Administrator role in this tenant. Error: $errDetails"
+    } else {
+      Write-Output "ERROR: $errMsg$(if ($errDetails) { ' | ' + $errDetails } else { '' })"
+    }
   }
 }`
     const output = await psSession.run(script)
     const lines = output.split('\n')
-    const err403 = lines.find(l => l.startsWith('ERROR_403:'))
-    if (err403) {
-      const detail = err403.slice('ERROR_403:'.length).trim()
-      throw new Error(
-        'Access denied (403 Forbidden).' +
-        (detail ? ` Graph said: ${detail}.` : '') +
-        ' Disconnect and reconnect to refresh your token, then try again.'
-      )
-    }
+    const noScope = lines.find(l => l.startsWith('ERROR_NO_SCOPE:'))
+    if (noScope) throw new Error(noScope.slice('ERROR_NO_SCOPE:'.length).trim())
+    const roleErr = lines.find(l => l.startsWith('ERROR_403_ROLE:'))
+    if (roleErr) throw new Error(roleErr.slice('ERROR_403_ROLE:'.length).trim())
     const errorLine = lines.find(l => l.startsWith('ERROR:'))
     if (errorLine) throw new Error(errorLine.slice('ERROR:'.length).trim())
     return { success: lines.some(l => l.trim() === 'SUCCESS') }
