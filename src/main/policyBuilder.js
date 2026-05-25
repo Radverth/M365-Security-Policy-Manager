@@ -32,7 +32,9 @@ try {
 ${indented}
     Write-Output "SUCCESS: ${id} created"
 } catch {
-    Write-Output "FAILURE: ${id} - $($_.Exception.Message)"
+    $errMsg = $_.Exception.Message
+    $errDetails = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { " | $($_.ErrorDetails.Message)" } else { '' }
+    Write-Output "FAILURE: ${id} - $errMsg$errDetails"
 }`
 }
 

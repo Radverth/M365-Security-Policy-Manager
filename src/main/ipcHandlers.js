@@ -481,31 +481,26 @@ function generateDocxHtml(orgName, policies, date, nameMap = {}, recommendations
       for (let i = 0; i < data.length - 8;) {
         if (data[i] === 0xFF) {
           const m = data[i + 1]
-          if (m >= 0xC0 && m <= 0xC3) {
-            h = (data[i + 5] << 8) | data[i + 6]
-            w = (data[i + 7] << 8) | data[i + 8]
-            break
-          }
+          if (m >= 0xC0 && m <= 0xC3) { h = (data[i + 5] << 8) | data[i + 6]; w = (data[i + 7] << 8) | data[i + 8]; break }
           if (m === 0xD8 || m === 0xD9) { i += 2; continue }
           i += 2 + ((data[i + 2] << 8) | data[i + 3])
         } else i++
       }
     } else if (mime === 'image/png') {
-      // PNG IHDR: bytes 16-24 (w then h, big-endian uint32)
       w = (data[16] << 24) | (data[17] << 16) | (data[18] << 8) | data[19]
       h = (data[20] << 24) | (data[21] << 16) | (data[22] << 8) | data[23]
     }
     const scaledH = w > 0 ? Math.round(648 * h / w) : defaultH
     return `<p style="margin:0;padding:0"><img src="data:${mime};base64,${b64}" width="648" height="${scaledH}" /></p>`
   }
-  const base = app.isPackaged ? process.resourcesPath : path.join(__dirname, '../..')
+  const _imgBase = app.isPackaged ? process.resourcesPath : path.join(__dirname, '../..')
   try {
-    coverImgHtml = _tryImg(path.join(base, 'assets/affinity-header.png'), 'image/png', 280, 1296)
+    coverImgHtml = _tryImg(path.join(_imgBase, 'assets/affinity-header.png'), 'image/png', 280, 1296)
   } catch {
     try {
-      coverImgHtml = _tryImg(path.join(base, 'assets/affinity_it_services_ltd_cover.jpeg'), 'image/jpeg', 397, 1585)
+      coverImgHtml = _tryImg(path.join(_imgBase, 'assets/affinity_it_services_ltd_cover.jpeg'), 'image/jpeg', 397, 1585)
     } catch {
-      coverImgHtml = `<p style="font-size:38pt;font-weight:200;color:#1a2d4a;border-top:6px solid #E8A830;padding-top:12px;margin-bottom:4px">Affinity IT</p><p style="font-size:11pt;color:#E8A830;letter-spacing:1px;margin-bottom:16px">Technology. Together.</p>`
+      coverImgHtml = `<p style="font-size:38pt;font-weight:200;color:#1a2d4a;border-top:6px solid #E8A830;padding-top:12px;margin-bottom:4px">Affinity IT</p><p style="font-size:11pt;color:#E8A830;margin-bottom:16px">Technology. Together.</p>`
     }
   }
 
@@ -572,8 +567,8 @@ function generateDocxHtml(orgName, policies, date, nameMap = {}, recommendations
     enabledForReportingButNotEnforced: { fg: '#b45309', bg: '#fef3c7' },
     disabled:                          { fg: '#6b7280', bg: '#f3f4f6' },
   }
-  const SEV_COLOR = { critical: '#dc2626', high: '#ea580c', medium: '#ca8a04', low: '#16a34a', info: '#0369a1' }
-  const SEV_BG    = { critical: '#fef2f2', high: '#fff7ed', medium: '#fffbeb', low: '#f0fdf4', info: '#f0f9ff' }
+  const SEV_COLOR = { critical: '#991b1b', high: '#92400e', medium: '#78350f', low: '#14532d', info: '#1e3a8a' }
+  const SEV_BG    = { critical: '#fecaca', high: '#fde68a', medium: '#fef9c3', low: '#bbf7d0', info: '#bfdbfe' }
   const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3, info: 4 }
 
   // ── Policy inventory table rows ─────────────────────────────────────────────
@@ -623,7 +618,7 @@ function generateDocxHtml(orgName, policies, date, nameMap = {}, recommendations
         <td style="padding:7px 10px;font-size:9pt;color:#6b7280;border-bottom:1px solid #e5e7eb">${esc(POLICY_DESC[item.id] || '')}</td>
       </tr>`
     }).join('')
-    return `<h3 style="font-size:12pt;font-weight:700;color:#1a2d4a;margin-top:20px;margin-bottom:2px">${esc(r.name)} — <span style="color:${pctColor}">${pct}% compliant</span></h3>
+    return `<h3>${esc(r.name)} — ${pct}% compliant</h3>
 <p style="font-size:10pt;color:#6b7280;margin-bottom:8px">${esc(r.description || '')}</p>
 <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
   <thead>
@@ -669,9 +664,8 @@ ${r.unverifiableCount > 0 ? `<p style="font-size:9pt;color:#9ca3af;font-style:it
 <style>
 * { box-sizing: border-box; }
 body { font-family: 'Calibri', 'Segoe UI', sans-serif; font-size: 11pt; color: #1f2937; line-height: 1.6; background: #ffffff; }
-h1 { font-size: 26pt; font-weight: 300; color: #1a2d4a; margin: 0 0 4px 0; }
-h2 { font-size: 14pt; font-weight: 700; color: #1a2d4a; margin: 32px 0 10px 0; padding-bottom: 6px; border-bottom: 2px solid #E8A830; }
-h3 { font-size: 12pt; font-weight: 700; color: #1a2d4a; margin: 20px 0 6px 0; }
+h2 { font-size: 14pt; font-weight: 700; color: #1a2d4a; margin: 24px 0 10px 0; padding-bottom: 6px; border-bottom: 3px solid #E8A830; }
+h3 { font-size: 12pt; font-weight: 700; color: #d97706; margin: 20px 0 6px 0; }
 table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
 th { padding: 8px 12px; text-align: left; font-size: 10pt; font-weight: 700; }
 td { padding: 7px 12px; }
@@ -683,12 +677,14 @@ strong { color: #1a2d4a; }
 
 <!-- ═══ COVER ════════════════════════════════════════════════════════════════ -->
 ${coverImgHtml}
-<p style="font-size:9pt;font-weight:700;color:#9ca3af;letter-spacing:2px;margin-top:48px;margin-bottom:0">MICROSOFT 365 SECURITY POLICY REPORT</p>
-<p style="font-size:28pt;font-weight:700;color:#1a2d4a;line-height:1.2;margin-top:8px;margin-bottom:0">${esc(orgName || 'Tenant')}</p>
-<p style="font-size:11pt;color:#6b7280;margin-top:8px;margin-bottom:0">${esc(date)}</p>
-<table style="width:100%;border-collapse:collapse;margin-top:48px;margin-bottom:0">
+<p style="font-size:28pt;font-weight:900;color:#1a2d4a;line-height:1.1;margin-top:40px;margin-bottom:0">MICROSOFT 365</p>
+<p style="font-size:28pt;font-weight:900;color:#1a2d4a;line-height:1.1;margin-top:4px;margin-bottom:20px">SECURITY POLICY REPORT</p>
+<p style="font-size:1pt;border-bottom:3px solid #E8A830;margin:0 0 20px 0;line-height:0.5">&nbsp;</p>
+<p style="font-size:20pt;font-weight:700;color:#1a2d4a;margin-bottom:4px">${esc(orgName || 'Tenant')}</p>
+<p style="font-size:11pt;color:#6b7280;margin-bottom:40px">${esc(date)}</p>
+<table style="width:100%;border-collapse:collapse;margin-bottom:0">
   <tr>
-    <td style="border:1px solid #e5e7eb;border-top:4px solid #E8A830;padding:14px 18px;font-size:10pt;color:#374151">
+    <td style="border-left:4px solid #E8A830;padding:14px 18px;font-size:10pt;color:#374151">
       <strong>Confidential</strong> — Prepared by Affinity IT for <strong>${esc(orgName || 'your organisation')}</strong>.
       This report provides a full analysis of your Microsoft 365 Conditional Access security configuration, identifies gaps against
       Microsoft&rsquo;s recommended security baselines, and sets out a prioritised action plan.
@@ -697,7 +693,7 @@ ${coverImgHtml}
 </table>
 
 <!-- ═══ EXECUTIVE SUMMARY ═══════════════════════════════════════════════════ -->
-<h2 style="page-break-before:always;font-size:14pt;font-weight:700;color:#1a2d4a;margin:24px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Executive Summary</h2>
+<h2 style="page-break-before:always">Executive Summary</h2>
 <p>This report documents the Conditional Access policy configuration for <strong>${esc(orgName || 'your organisation')}</strong>
 as of <strong>${esc(date)}</strong>. Conditional Access is the enforcement layer in Microsoft Entra ID that controls who can
 access cloud applications, from which devices and locations, and under what conditions.</p>
@@ -725,7 +721,7 @@ and compared the configuration against Microsoft&rsquo;s recommended security ba
 
 ${recommendations.length > 0 ? `
 <!-- ═══ BASELINE COMPLIANCE ══════════════════════════════════════════════════ -->
-<h2 style="font-size:14pt;font-weight:700;color:#1a2d4a;margin:32px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Baseline Compliance Overview</h2>
+<h2>Baseline Compliance Overview</h2>
 <p>The table below shows how the current Conditional Access configuration compares against Microsoft&rsquo;s recommended security baselines.
 Each baseline represents a curated set of policies addressing a specific security scenario.</p>
 
@@ -742,7 +738,7 @@ Each baseline represents a curated set of policies addressing a specific securit
 </table>
 
 <!-- ═══ GAP ANALYSIS ═════════════════════════════════════════════════════════ -->
-<h2 style="page-break-before:always;font-size:14pt;font-weight:700;color:#1a2d4a;margin:24px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Gap Analysis &amp; Recommendations</h2>
+<h2 style="page-break-before:always">Gap Analysis &amp; Recommendations</h2>
 <p>The following section details each missing policy, its business risk, and the specific protection it provides. These findings form the
 basis of the recommended action plan. Policies are matched by ID in their display name <em>or</em> by their configuration, so
 any existing policy with the correct settings is detected regardless of its name.</p>
@@ -751,7 +747,7 @@ ${gapSections || '<p style="color:#15803d;font-weight:700">&#10003; No gaps iden
 
 ${allMissing.length > 0 ? `
 <!-- ═══ ACTION PLAN ══════════════════════════════════════════════════════════ -->
-<h2 style="page-break-before:always;font-size:14pt;font-weight:700;color:#1a2d4a;margin:24px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Recommended Action Plan</h2>
+<h2 style="page-break-before:always">Recommended Action Plan</h2>
 <p>The table below consolidates all recommended policies across the selected baselines, ordered by priority. Affinity IT
 can assist with the design, testing (Report Only mode), and phased enforcement of these policies in your environment.</p>
 
@@ -769,8 +765,8 @@ can assist with the design, testing (Report Only mode), and phased enforcement o
 
 <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
   <tr>
-    <td style="padding:14px 18px;background:#f8fafc;border-left:4px solid #E8A830;font-size:10pt;color:#374151">
-      <strong>Next steps:</strong> Affinity IT recommends deploying new policies in <em>Report Only</em> mode first to assess
+    <td style="padding:14px 18px;border-left:4px solid #E8A830;font-size:10pt;color:#374151">
+      <strong style="color:#1a2d4a">Next steps:</strong> Affinity IT recommends deploying new policies in <em>Report Only</em> mode first to assess
       impact before switching to enforcement. This approach avoids accidental lockouts and provides a clear baseline for review.
       ${amName && amEmail
         ? `Contact <strong>${esc(amName)}</strong> at <a href="mailto:${esc(amEmail)}" style="color:#1a2d4a">${esc(amEmail)}</a> to discuss a phased implementation programme.`
@@ -783,7 +779,7 @@ can assist with the design, testing (Report Only mode), and phased enforcement o
 ` : ''}
 
 <!-- ═══ POLICY INVENTORY ══════════════════════════════════════════════════════ -->
-<h2 style="page-break-before:always;font-size:14pt;font-weight:700;color:#1a2d4a;margin:24px 0 10px 0;padding-bottom:6px;border-bottom:2px solid #E8A830">Conditional Access Policy Inventory</h2>
+<h2 style="page-break-before:always">Conditional Access Policy Inventory</h2>
 <p>The following table lists all ${policies.length} Conditional Access ${policies.length === 1 ? 'policy' : 'policies'} currently configured in your tenant.</p>
 
 <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
@@ -796,19 +792,6 @@ can assist with the design, testing (Report Only mode), and phased enforcement o
     </tr>
   </thead>
   <tbody>${inventoryRows}</tbody>
-</table>
-
-<!-- ═══ FOOTER ═══════════════════════════════════════════════════════════════ -->
-<table style="width:100%;border-collapse:collapse;margin-top:40px">
-  <tr>
-    <td style="border-top:2px solid #E8A830;padding-top:12px">
-      <p style="font-size:9pt;color:#9ca3af;margin:0">Generated by M365 Security Policy Manager &middot; Affinity IT &middot; ${esc(date)} &middot; Confidential</p>
-      <p style="font-size:9pt;color:#9ca3af;margin-top:4px">${amName && amEmail
-        ? `To discuss these recommendations, please contact <strong style="color:#6b7280">${esc(amName)}</strong> at <a href="mailto:${esc(amEmail)}" style="color:#9ca3af">${esc(amEmail)}</a>.`
-        : 'To discuss these recommendations or engage Affinity IT to implement the identified improvements, please contact your Affinity account manager.'
-      }</p>
-    </td>
-  </tr>
 </table>
 
 </body>
@@ -1033,17 +1016,32 @@ function registerIpcHandlers(win) {
 
   ipcMain.handle('policies:update', async (_, id, patch) => {
     const safeId = safe(id)
-    const patchJson = JSON.stringify(patch)
+    const b64 = Buffer.from(JSON.stringify(patch)).toString('base64')
     const script = `
 try {
-  $body = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${Buffer.from(patchJson).toString('base64')}'))
-  Invoke-MgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies/${safeId}" -Body $body -ContentType 'application/json'
+  $body = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64}'))
+  Invoke-MgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies/${safeId}" -Body $body -ContentType 'application/json' | Out-Null
   Write-Output "SUCCESS"
 } catch {
-  Write-Output "ERROR: $($_.Exception.Message)"
+  $errMsg = $_.Exception.Message
+  $errDetails = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { '' }
+  if ($errMsg -match '403|Forbidden') {
+    Write-Output "ERROR_403: $errDetails"
+  } else {
+    Write-Output "ERROR: $errMsg$(if ($errDetails) { ' | ' + $errDetails } else { '' })"
+  }
 }`
     const output = await psSession.run(script)
     const lines = output.split('\n')
+    const err403 = lines.find(l => l.startsWith('ERROR_403:'))
+    if (err403) {
+      const detail = err403.slice('ERROR_403:'.length).trim()
+      throw new Error(
+        'Access denied (403 Forbidden).' +
+        (detail ? ` Graph said: ${detail}.` : '') +
+        ' Disconnect and reconnect to refresh your token, then try again.'
+      )
+    }
     const errorLine = lines.find(l => l.startsWith('ERROR:'))
     if (errorLine) throw new Error(errorLine.slice('ERROR:'.length).trim())
     return { success: lines.some(l => l.trim() === 'SUCCESS') }
@@ -1260,14 +1258,18 @@ Write-Output "NAME_MAP_END"`,
     const amName  = accountManager?.name  || null
     const amEmail = accountManager?.email || null
     const html = generateDocxHtml(orgName, policies, date, nameMap || {}, recommendations || [], amName, amEmail)
+    const escH = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const headerHtml = `<table style="width:100%;border-collapse:collapse"><tr><td style="font-size:9pt;font-weight:600;color:#1a2d4a;padding:4px 0;border-bottom:2px solid #E8A830">${escH(orgName || 'Security Report')} &middot; Microsoft 365 Security Report</td><td style="font-size:9pt;color:#9ca3af;text-align:right;padding:4px 0;border-bottom:2px solid #E8A830">Confidential</td></tr></table>`
+    const footerHtml = `<p style="font-size:9pt;color:#9ca3af;border-top:1px solid #e5e7eb;padding-top:4px;margin:0">Generated by M365 Security Policy Manager &middot; Affinity IT &middot; ${escH(date)}${amName ? ` &middot; ${escH(amName)}` : ''}</p>`
     try {
-      const buffer = await HTMLtoDOCX(html, null, {
+      const buffer = await HTMLtoDOCX(html, headerHtml, {
         table: { row: { cantSplit: true } },
         footer: true,
         pageNumber: true,
+        header: true,
         font: 'Calibri',
         fontSize: 22,
-      })
+      }, footerHtml)
       fs.writeFileSync(filePath, buffer)
       return { path: filePath }
     } catch (err) {
@@ -1280,6 +1282,8 @@ Write-Output "NAME_MAP_END"`,
     if (!psSession.alive) return { items: [], error: 'No active session' }
     const safeQ = safe(query || '')
     if (!safeQ) return { items: [] }
+    // Use $search (substring match) across displayName and UPN — two separate requests
+    // then deduplicate. $search requires ConsistencyLevel:eventual and $count=true.
     const script = `
 try {
   $q = '${safeQ}'
@@ -1296,21 +1300,15 @@ try {
   $result = @($combined | Select-Object -First 15 | ForEach-Object {
     @{ id = $_.id; displayName = $_.displayName; mail = if ($_.mail) { $_.mail } else { $_.userPrincipalName } }
   })
-  Write-Output 'SEARCH_JSON_START'
-  if ($result.Count -eq 0) { Write-Output '[]' } else { Write-Output ($result | ConvertTo-Json -Compress) }
-  Write-Output 'SEARCH_JSON_END'
+  if ($result.Count -eq 0) { '[]' } else { $result | ConvertTo-Json -Compress }
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
 }`
     const output = await psSession.run(script)
     const errorLine = output.split('\n').find(l => l.startsWith('ERROR:'))
     if (errorLine) return { items: [], error: errorLine.slice(6).trim() }
-    const lines = output.split('\n')
-    const s = lines.indexOf('SEARCH_JSON_START')
-    const e = lines.indexOf('SEARCH_JSON_END')
-    if (s === -1 || e <= s) return { items: [] }
     try {
-      const items = JSON.parse(lines.slice(s + 1, e).join('').trim() || '[]')
+      const items = JSON.parse(output.trim() || '[]')
       return { items: Array.isArray(items) ? items : [items] }
     } catch {
       return { items: [] }
@@ -1329,21 +1327,15 @@ try {
   $result = @($resp.value | Where-Object { $_ } | ForEach-Object {
     @{ id = $_.id; displayName = $_.displayName; description = $_.description }
   })
-  Write-Output 'SEARCH_JSON_START'
-  if ($result.Count -eq 0) { Write-Output '[]' } else { Write-Output ($result | ConvertTo-Json -Compress) }
-  Write-Output 'SEARCH_JSON_END'
+  if ($result.Count -eq 0) { '[]' } else { $result | ConvertTo-Json -Compress }
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
 }`
     const output = await psSession.run(script)
     const errorLine = output.split('\n').find(l => l.startsWith('ERROR:'))
     if (errorLine) return { items: [], error: errorLine.slice(6).trim() }
-    const lines = output.split('\n')
-    const s = lines.indexOf('SEARCH_JSON_START')
-    const e = lines.indexOf('SEARCH_JSON_END')
-    if (s === -1 || e <= s) return { items: [] }
     try {
-      const items = JSON.parse(lines.slice(s + 1, e).join('').trim() || '[]')
+      const items = JSON.parse(output.trim() || '[]')
       return { items: Array.isArray(items) ? items : [items] }
     } catch {
       return { items: [] }
