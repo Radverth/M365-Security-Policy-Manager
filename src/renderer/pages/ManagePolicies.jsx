@@ -34,6 +34,69 @@ function cleanForGraph(v) {
   return v
 }
 
+// Build a safe, explicit Graph API conditions object by extracting only known fields
+// using pick() for PascalCase/camelCase tolerance. Avoids AdditionalProperties
+// corruption that cleanForGraph causes at the conditions level.
+function buildGraphConditions(rawCond, usersOverride) {
+  const result = { users: usersOverride }
+
+  const apps = pick(rawCond, 'Applications', 'applications')
+  if (apps) {
+    const a = {}
+    const incA = pick(apps, 'IncludeApplications', 'includeApplications')
+    if (incA) a.includeApplications = incA
+    const excA = pick(apps, 'ExcludeApplications', 'excludeApplications')
+    if (excA) a.excludeApplications = excA
+    const ua = pick(apps, 'IncludeUserActions', 'includeUserActions')
+    if (ua) a.includeUserActions = ua
+    const authCtx = pick(apps, 'IncludeAuthenticationContextClassReferences', 'includeAuthenticationContextClassReferences')
+    if (authCtx) a.includeAuthenticationContextClassReferences = authCtx
+    const appFilter = pick(apps, 'ApplicationFilter', 'applicationFilter')
+    if (appFilter) a.applicationFilter = { mode: pick(appFilter, 'Mode', 'mode'), rule: pick(appFilter, 'Rule', 'rule') }
+    result.applications = a
+  }
+
+  const cat = pick(rawCond, 'ClientAppTypes', 'clientAppTypes')
+  if (cat) result.clientAppTypes = cat
+
+  const plat = pick(rawCond, 'Platforms', 'platforms')
+  if (plat) {
+    const p = {}
+    const incP = pick(plat, 'IncludePlatforms', 'includePlatforms')
+    if (incP) p.includePlatforms = incP
+    const excP = pick(plat, 'ExcludePlatforms', 'excludePlatforms')
+    if (excP) p.excludePlatforms = excP
+    result.platforms = p
+  }
+
+  const loc = pick(rawCond, 'Locations', 'locations')
+  if (loc) {
+    const l = {}
+    const incL = pick(loc, 'IncludeLocations', 'includeLocations')
+    if (incL) l.includeLocations = incL
+    const excL = pick(loc, 'ExcludeLocations', 'excludeLocations')
+    if (excL) l.excludeLocations = excL
+    result.locations = l
+  }
+
+  const srl = pick(rawCond, 'SignInRiskLevels', 'signInRiskLevels')
+  if (srl) result.signInRiskLevels = srl
+
+  const url = pick(rawCond, 'UserRiskLevels', 'userRiskLevels')
+  if (url) result.userRiskLevels = url
+
+  const sprl = pick(rawCond, 'ServicePrincipalRiskLevels', 'servicePrincipalRiskLevels')
+  if (sprl) result.servicePrincipalRiskLevels = sprl
+
+  const dev = pick(rawCond, 'Devices', 'devices')
+  if (dev) {
+    const df = pick(dev, 'DeviceFilter', 'deviceFilter')
+    if (df) result.devices = { deviceFilter: { mode: pick(df, 'Mode', 'mode'), rule: pick(df, 'Rule', 'rule') } }
+  }
+
+  return result
+}
+
 const GRANT_LABELS = {
   mfa: 'Require MFA', compliantDevice: 'Require compliant device',
   domainJoinedDevice: 'Require hybrid joined', approvedApplication: 'Require approved app',
@@ -168,13 +231,10 @@ function PolicyEditor({ policy, onSave, onCancel, saving, noSession }) {
     if (excGrpIds.length)  usersObj.excludeGroups = excGrpIds
     if (excUserIds.length) usersObj.excludeUsers  = excUserIds
 
-    // Preserve existing conditions (applications, locations etc.) — Graph requires
-    // the full conditions object on PATCH. Strip PS SDK metadata before sending.
-    const cleanedConditions = cleanForGraph(cond)
     const patch = {
       displayName: name,
       state,
-      conditions: { ...cleanedConditions, users: usersObj },
+      conditions: buildGraphConditions(cond, usersObj),
     }
 
     if (!hasAuthStrength) {
