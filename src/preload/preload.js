@@ -44,6 +44,16 @@ contextBridge.exposeInMainWorld('api', {
     toggleState: (id, state) => ipcRenderer.invoke('policies:toggleState', id, state),
   },
 
+  // Backup / Restore
+  backup: {
+    create: (data) => ipcRenderer.invoke('backup:create', data),
+    list: () => ipcRenderer.invoke('backup:list'),
+    get: (filename) => ipcRenderer.invoke('backup:get', filename),
+    restore: (policy) => ipcRenderer.invoke('backup:restore', policy),
+    delete: (filename) => ipcRenderer.invoke('backup:delete', filename),
+    openDir: () => ipcRenderer.invoke('backup:openDir'),
+  },
+
   // App
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
