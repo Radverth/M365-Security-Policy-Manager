@@ -173,6 +173,315 @@ function formatDate(d) {
   try { return new Date(d).toLocaleDateString() } catch { return d }
 }
 
+// ── Backup helpers ────────────────────────────────────────────────────────────
+
+const TRIGGER_META = {
+  login:        { label: 'Login',       cls: 'bg-blue-100 text-blue-700' },
+  'pre-edit':   { label: 'Pre-Edit',    cls: 'bg-amber-100 text-amber-700' },
+  'pre-delete': { label: 'Pre-Delete',  cls: 'bg-red-100 text-red-700' },
+  manual:       { label: 'Manual',      cls: 'bg-gray-100 text-gray-600' },
+}
+
+function fmtBackupTime(ts) {
+  if (!ts) return null
+  try {
+    const diffMins = Math.floor((Date.now() - new Date(ts)) / 60000)
+    if (diffMins < 1) return 'just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    const diffHours = Math.floor(diffMins / 60)
+    if (diffHours < 24) return `${diffHours}h ago`
+    const diffDays = Math.floor(diffHours / 24)
+    if (diffDays < 7) return `${diffDays}d ago`
+    return new Date(ts).toLocaleDateString()
+  } catch { return null }
+}
+
+function fmtFullTs(ts) {
+  try {
+    return new Date(ts).toLocaleString(undefined, {
+      month: 'short', day: 'numeric', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    })
+  } catch { return ts }
+}
+
+function TriggerBadge({ trigger }) {
+  const meta = TRIGGER_META[trigger] || { label: trigger || 'Unknown', cls: 'bg-gray-100 text-gray-600' }
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${meta.cls}`}>
+      {meta.label}
+    </span>
+  )
+}
+
+// ── Backup/Restore modal ──────────────────────────────────────────────────────
+function BackupRestoreModal({ open, onClose }) {
+  const { addNotification } = useStore()
+  const [backups, setBackups] = useState([])
+  const [loadingList, setLoadingList] = useState(false)
+  const [selectedBackup, setSelectedBackup] = useState(null)
+  const [loadingBackup, setLoadingBackup] = useState(false)
+  const [selectedPolicies, setSelectedPolicies] = useState(new Set())
+  const [restoring, setRestoring] = useState(false)
+  const [view, setView] = useState('list')
+
+  useEffect(() => {
+    if (open) {
+      setView('list')
+      setSelectedBackup(null)
+      setSelectedPolicies(new Set())
+      fetchBackups()
+    }
+  }, [open])
+
+  const fetchBackups = async () => {
+    if (!window.api?.backup) return
+    setLoadingList(true)
+    try {
+      const result = await window.api.backup.list()
+      setBackups(result.success ? (result.backups || []) : [])
+    } finally {
+      setLoadingList(false)
+    }
+  }
+
+  const handleViewBackup = async (backup) => {
+    setLoadingBackup(true)
+    try {
+      const result = await window.api.backup.get(backup.filename)
+      if (result.success && result.data) {
+        setSelectedBackup(result.data)
+        setSelectedPolicies(new Set((result.data.policies || []).map(p => p.Id || p.id)))
+        setView('detail')
+      } else {
+        addNotification('Failed to load backup', 'error')
+      }
+    } finally {
+      setLoadingBackup(false)
+    }
+  }
+
+  const handleRestore = async () => {
+    if (!selectedBackup || selectedPolicies.size === 0) return
+    setRestoring(true)
+    const toRestore = (selectedBackup.policies || []).filter(p => selectedPolicies.has(p.Id || p.id))
+    let successCount = 0
+    const failedNames = []
+    for (const policy of toRestore) {
+      const result = await window.api.backup.restore(policy)
+      if (result.success) {
+        successCount++
+      } else {
+        failedNames.push(policy.DisplayName || policy.displayName || 'Unknown policy')
+      }
+    }
+    if (successCount > 0) {
+      addNotification(`Restored ${successCount} polic${successCount === 1 ? 'y' : 'ies'} successfully`, 'success')
+    }
+    if (failedNames.length > 0) {
+      addNotification(`Failed to restore: ${failedNames.join(', ')}`, 'error')
+    }
+    setRestoring(false)
+    if (failedNames.length === 0) onClose()
+  }
+
+  const handleDeleteBackup = async (backup, e) => {
+    e.stopPropagation()
+    if (!window.api?.backup) return
+    await window.api.backup.delete(backup.filename)
+    setBackups(bs => bs.filter(b => b.filename !== backup.filename))
+  }
+
+  const togglePolicy = (id) => {
+    setSelectedPolicies(prev => {
+      const ns = new Set(prev)
+      ns.has(id) ? ns.delete(id) : ns.add(id)
+      return ns
+    })
+  }
+
+  const allPolicyIds = (selectedBackup?.policies || []).map(p => p.Id || p.id)
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={view === 'list' ? 'Policy Backups' : 'Restore Policies from Backup'}
+      size="xl"
+    >
+      {view === 'list' ? (
+        <div className="space-y-3 pt-1">
+          <p className="text-xs text-gray-500">
+            Backups are created automatically before edits, deletions, and when policies are first loaded from a tenant.
+          </p>
+
+          {loadingList ? (
+            <div className="py-10 flex items-center justify-center gap-2 text-gray-400 text-sm">
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+              Loading backups…
+            </div>
+          ) : backups.length === 0 ? (
+            <div className="py-10 flex flex-col items-center text-gray-400">
+              <svg className="w-10 h-10 mb-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+              </svg>
+              <p className="text-sm font-medium">No backups yet</p>
+              <p className="text-xs text-gray-300 mt-1">Load policies to create your first automatic backup</p>
+            </div>
+          ) : (
+            <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
+              {backups.map(backup => (
+                <div
+                  key={backup.filename}
+                  className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3 hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <TriggerBadge trigger={backup.trigger} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900">{fmtFullTs(backup.timestamp)}</p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {backup.policyCount} polic{backup.policyCount !== 1 ? 'ies' : 'y'}
+                        {backup.account && backup.account !== 'unknown' && ` · ${backup.account}`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => handleViewBackup(backup)}
+                      loading={loadingBackup}
+                    >
+                      View &amp; Restore
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={(e) => handleDeleteBackup(backup, e)}>
+                      <span className="text-red-500 text-xs">Delete</span>
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex justify-between items-center pt-3 border-t border-gray-100 mt-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => window.api?.backup?.openDir()}
+            >
+              <svg className="w-3.5 h-3.5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              </svg>
+              Open Backup Folder
+            </Button>
+            <Button variant="secondary" onClick={onClose}>Close</Button>
+          </div>
+        </div>
+      ) : (
+        /* Detail / restore view */
+        <div className="space-y-3 pt-1">
+          {/* Back + backup info */}
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => setView('list')}
+              className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+              Back to all backups
+            </button>
+            <div className="flex items-center gap-2">
+              <TriggerBadge trigger={selectedBackup?.trigger} />
+              <span className="text-xs text-gray-400">{fmtFullTs(selectedBackup?.timestamp)}</span>
+            </div>
+          </div>
+
+          {/* Warning */}
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 flex gap-3">
+            <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <p className="text-xs text-amber-800">
+              Restoring creates <strong>new copies</strong> of the selected policies in the current connected tenant. Original policy IDs are not preserved.
+            </p>
+          </div>
+
+          {/* Select all / none */}
+          <div className="flex items-center justify-between px-1">
+            <span className="text-xs text-gray-500">
+              {selectedPolicies.size} of {allPolicyIds.length} selected
+            </span>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setSelectedPolicies(new Set(allPolicyIds))}
+                className="text-xs text-blue-600 hover:text-blue-800 transition-colors"
+              >
+                Select all
+              </button>
+              <button
+                onClick={() => setSelectedPolicies(new Set())}
+                className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+
+          {/* Policy checklist */}
+          <div className="rounded-lg border border-gray-200 overflow-hidden max-h-72 overflow-y-auto">
+            {(selectedBackup?.policies || []).map((policy, idx) => {
+              const id = policy.Id || policy.id
+              const name = policy.DisplayName || policy.displayName || 'Unnamed policy'
+              const state = policy.State || policy.state
+              return (
+                <label
+                  key={id || idx}
+                  className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedPolicies.has(id)}
+                    onChange={() => togglePolicy(id)}
+                    className="h-4 w-4 rounded border-gray-300 text-navy flex-shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{name}</p>
+                    <p className="text-xs text-gray-400 font-mono truncate">{id}</p>
+                  </div>
+                  <div className="flex-shrink-0">{stateBadge(state)}</div>
+                </label>
+              )
+            })}
+          </div>
+
+          <div className="flex justify-between items-center pt-3 border-t border-gray-100">
+            <Button variant="secondary" onClick={() => setView('list')}>Back</Button>
+            <div className="flex items-center gap-3">
+              {selectedPolicies.size > 0 && (
+                <span className="text-xs text-gray-400">
+                  Will create {selectedPolicies.size} new polic{selectedPolicies.size !== 1 ? 'ies' : 'y'}
+                </span>
+              )}
+              <Button
+                variant="primary"
+                onClick={handleRestore}
+                loading={restoring}
+                disabled={selectedPolicies.size === 0}
+              >
+                Restore Selected
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 // ── Policy editor ─────────────────────────────────────────────────────────────
 function SummaryRow({ label, value }) {
   if (!value) return null
@@ -377,8 +686,41 @@ export default function ManagePolicies() {
   const [bulkLoading, setBulkLoading] = useState(false)
   const [editTarget, setEditTarget] = useState(null)
   const [saveLoading, setSaveLoading] = useState(false)
+  // Backup state
+  const [lastBackup, setLastBackup] = useState(null)
+  const [backupCount, setBackupCount] = useState(0)
+  const [showBackups, setShowBackups] = useState(false)
   // Effective connection: prefer local connectedAs, fall back to global session
   const effectiveSession = connectedAs || tenantSession
+
+  // Load existing backup metadata on mount
+  useEffect(() => {
+    if (!window.api?.backup) return
+    window.api.backup.list().then(result => {
+      if (result.success && result.backups.length > 0) {
+        setLastBackup(result.backups[0])
+        setBackupCount(result.backups.length)
+      }
+    }).catch(() => {})
+  }, [])
+
+  // Helper: silently create a backup and update status state
+  const createBackup = async (policyList, trigger) => {
+    if (!window.api?.backup) return
+    try {
+      const session = connectedAs || tenantSession
+      const result = await window.api.backup.create({
+        policies: policyList,
+        tenantId: session?.TenantId,
+        account: session?.Account,
+        trigger,
+      })
+      if (result.success) {
+        setLastBackup({ timestamp: result.timestamp, trigger, policyCount: policyList.length })
+        setBackupCount(c => c + 1)
+      }
+    } catch {}
+  }
 
   const handleLoad = async () => {
     if (!window.api) return
@@ -390,9 +732,14 @@ export default function ManagePolicies() {
         return
       }
       const { policies: loadedPolicies = [], context = null } = result || {}
-      setPolicies(Array.isArray(loadedPolicies) ? loadedPolicies : [])
+      const normalizedPolicies = Array.isArray(loadedPolicies) ? loadedPolicies : []
+      setPolicies(normalizedPolicies)
       setSelectedRows(new Set())
       if (context) setConnectedAs(context)
+      // Auto-backup on tenant login / initial load
+      if (normalizedPolicies.length > 0) {
+        createBackup(normalizedPolicies, 'login')
+      }
     } catch (err) {
       addNotification('Failed to load policies: ' + err.message, 'error')
     } finally {
@@ -441,6 +788,8 @@ export default function ManagePolicies() {
     if (!window.api || !deleteTarget) return
     setDeleteLoading(true)
     try {
+      // Backup before deleting
+      await createBackup([deleteTarget], 'pre-delete')
       await window.api.policies.delete(deleteTarget.Id, connectedAs?.TenantId)
       setPolicies((ps) => ps.filter((p) => p.Id !== deleteTarget.Id))
       addNotification('Policy deleted', 'success')
@@ -470,6 +819,9 @@ export default function ManagePolicies() {
     const ids = [...selectedRows]
     try {
       if (bulkAction === 'delete') {
+        // Backup all policies being deleted before proceeding
+        const policiesToBackup = policies.filter(p => ids.includes(p.Id))
+        await createBackup(policiesToBackup, 'pre-delete')
         await Promise.all(ids.map((id) => window.api.policies.delete(id, connectedAs?.TenantId)))
         setPolicies((ps) => ps.filter((p) => !selectedRows.has(p.Id)))
         addNotification(`${ids.length} policies deleted`, 'success')
@@ -493,6 +845,8 @@ export default function ManagePolicies() {
     if (!window.api || !editTarget) return
     setSaveLoading(true)
     try {
+      // Backup original policy before applying changes
+      await createBackup([editTarget], 'pre-edit')
       const result = await window.api.policies.update(editTarget.Id, patch)
       setPolicies(ps => ps.map(p => {
         if (p.Id !== editTarget.Id) return p
@@ -550,6 +904,39 @@ export default function ManagePolicies() {
               <Button variant="primary" size="sm" onClick={openConnectModal}>Connect Tenant</Button>
             </div>
           )}
+
+          {/* Backup status — visible when connected */}
+          {effectiveSession && (
+            <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                </svg>
+                <div>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Policy Backups</p>
+                  {lastBackup ? (
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      <p className="text-sm text-gray-700">
+                        Last: <span className="font-medium">{fmtBackupTime(lastBackup.timestamp)}</span>
+                      </p>
+                      <TriggerBadge trigger={lastBackup.trigger} />
+                      {backupCount > 1 && (
+                        <span className="text-xs text-gray-400">{backupCount} saved</span>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400 mt-0.5">
+                      {policies.length > 0 ? 'Backup will run automatically' : 'Backup will run when policies load'}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <Button size="sm" variant="secondary" onClick={() => setShowBackups(true)}>
+                View Backups
+              </Button>
+            </div>
+          )}
+
           {loading && (
             <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
               <p className="font-medium mb-1">Loading policies…</p>
@@ -592,6 +979,12 @@ export default function ManagePolicies() {
                 <Button size="sm" variant="secondary" onClick={handleBulk} loading={bulkLoading} disabled={!bulkAction}>Apply</Button>
               </>
             )}
+            <Button size="sm" variant="secondary" onClick={() => setShowBackups(true)}>
+              <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+              </svg>
+              Backups
+            </Button>
             <Button size="sm" variant="secondary" onClick={handleLoad} loading={loading}>
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -690,6 +1083,7 @@ export default function ManagePolicies() {
         )}
       </Card>
 
+      {/* Delete confirmation modal */}
       <Modal
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
@@ -700,11 +1094,22 @@ export default function ManagePolicies() {
         onConfirm={handleDelete}
         loading={deleteLoading}
       >
-        <p className="py-2">
-          Are you sure you want to delete <strong>{deleteTarget?.DisplayName}</strong>? This cannot be undone.
-        </p>
+        <div className="py-2 space-y-3">
+          <p>
+            Are you sure you want to delete <strong>{deleteTarget?.DisplayName}</strong>? This cannot be undone.
+          </p>
+          <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+            <svg className="w-4 h-4 text-emerald-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+            </svg>
+            <p className="text-xs text-emerald-800">
+              A backup will be created automatically before deletion so you can restore it later.
+            </p>
+          </div>
+        </div>
       </Modal>
 
+      {/* Edit modal */}
       <Modal
         open={!!editTarget}
         onClose={() => setEditTarget(null)}
@@ -719,6 +1124,12 @@ export default function ManagePolicies() {
           noSession={!effectiveSession}
         />
       </Modal>
+
+      {/* Backup/Restore modal */}
+      <BackupRestoreModal
+        open={showBackups}
+        onClose={() => setShowBackups(false)}
+      />
     </div>
   )
 }

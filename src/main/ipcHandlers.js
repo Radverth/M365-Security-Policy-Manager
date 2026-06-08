@@ -1252,6 +1252,29 @@ async function generateDocxBuffer(orgName, policies, date, nameMap = {}, recomme
 let _win = null
 let _handlersRegistered = false
 
+// Strip read-only Graph fields and normalize PascalCase → camelCase for POST restore
+function cleanPolicyForRestore(policy) {
+  const TOP_STRIP = new Set(['id', 'Id', 'createdDateTime', 'CreatedDateTime', 'modifiedDateTime', 'ModifiedDateTime', 'templateId', 'TemplateId'])
+  const META_STRIP = new Set(['AdditionalProperties', 'BackingStore'])
+  function clean(v, topLevel) {
+    if (Array.isArray(v)) return v.map(item => clean(item, false))
+    if (v && typeof v === 'object') {
+      const extra = (v.AdditionalProperties && typeof v.AdditionalProperties === 'object') ? v.AdditionalProperties : {}
+      const result = {}
+      for (const [k, val] of Object.entries(v)) {
+        if (META_STRIP.has(k) || k.startsWith('@')) continue
+        if (topLevel && TOP_STRIP.has(k)) continue
+        const cleanKey = k.charAt(0).toLowerCase() + k.slice(1)
+        const cleanVal = clean(val, false)
+        if (cleanVal !== null && cleanVal !== undefined) result[cleanKey] = cleanVal
+      }
+      return { ...result, ...extra }
+    }
+    return v
+  }
+  return clean(policy, true)
+}
+
 function registerIpcHandlers(win) {
   _win = win
 
@@ -1570,6 +1593,132 @@ try {
     const errorLine = lines.find(l => l.startsWith('ERROR:'))
     if (errorLine) throw new Error(errorLine.slice('ERROR:'.length).trim())
     return { success: lines.some(l => l.trim() === 'SUCCESS') }
+  })
+
+  // ── Backup / Restore ──────────────────────────────────────────────────────
+  const getBackupDir = () => path.join(app.getPath('userData'), 'policy-backups')
+
+  ipcMain.handle('backup:create', async (_, { policies: pols, tenantId, account, trigger }) => {
+    try {
+      const dir = getBackupDir()
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+      const ts = new Date().toISOString()
+      const filename = `backup-${ts.replace(/[:.]/g, '-')}-${trigger}.json`
+      const filepath = path.join(dir, filename)
+      const data = {
+        version: 1,
+        timestamp: ts,
+        tenantId: tenantId || 'unknown',
+        account: account || 'unknown',
+        trigger,
+        policyCount: Array.isArray(pols) ? pols.length : 0,
+        policies: Array.isArray(pols) ? pols : [],
+      }
+      fs.writeFileSync(filepath, JSON.stringify(data, null, 2), 'utf-8')
+      logger.info(`backup:create trigger=${trigger} count=${data.policyCount} file=${filename}`)
+      // Prune oldest backups, keep last 50
+      try {
+        const files = fs.readdirSync(dir).filter(f => f.endsWith('.json')).sort()
+        if (files.length > 50) {
+          files.slice(0, files.length - 50).forEach(f => {
+            try { fs.unlinkSync(path.join(dir, f)) } catch {}
+          })
+        }
+      } catch {}
+      return { success: true, filename, timestamp: ts }
+    } catch (err) {
+      logger.error('backup:create error: ' + err.message)
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('backup:list', async () => {
+    try {
+      const dir = getBackupDir()
+      if (!fs.existsSync(dir)) return { success: true, backups: [] }
+      const backups = fs.readdirSync(dir)
+        .filter(f => f.endsWith('.json'))
+        .map(f => {
+          try {
+            const { policies: _p, ...meta } = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8'))
+            return { filename: f, ...meta }
+          } catch { return null }
+        })
+        .filter(Boolean)
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      return { success: true, backups }
+    } catch (err) {
+      return { success: false, error: err.message, backups: [] }
+    }
+  })
+
+  ipcMain.handle('backup:get', async (_, filename) => {
+    try {
+      const filepath = path.join(getBackupDir(), path.basename(filename))
+      const raw = fs.readFileSync(filepath, 'utf-8')
+      return { success: true, data: JSON.parse(raw) }
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('backup:restore', async (_, policy) => {
+    if (!psSession.alive) return { success: false, error: 'No active session — connect a tenant to restore policies' }
+    try {
+      const cleaned = cleanPolicyForRestore(policy)
+      const b64 = Buffer.from(JSON.stringify(cleaned)).toString('base64')
+      const script = `
+try {
+  $body = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64}'))
+  $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies" -Body $body -ContentType 'application/json' -ErrorAction Stop
+  Write-Output "RESTORE_JSON_START"
+  if ($result) { $result | ConvertTo-Json -Depth 10 -Compress } else { Write-Output '{}' }
+  Write-Output "RESTORE_JSON_END"
+  Write-Output "SUCCESS"
+} catch {
+  $errMsg = $_.Exception.Message
+  $detail = ''
+  try {
+    $edm = $_.ErrorDetails.Message
+    if ($edm) {
+      $parsed = $edm | ConvertFrom-Json -ErrorAction SilentlyContinue
+      if ($parsed -and $parsed.error) { $detail = "$($parsed.error.code): $($parsed.error.message)" }
+      else { $detail = $edm }
+    }
+  } catch {}
+  Write-Output "ERROR: $errMsg$(if ($detail) { ' | ' + $detail } else { '' })"
+}`
+      const lines = []
+      await psSession.run(script, l => lines.push(l), 60000)
+      const errorLine = lines.find(l => l.startsWith('ERROR:'))
+      if (errorLine) return { success: false, error: errorLine.slice('ERROR:'.length).trim() }
+      const rStart = lines.indexOf('RESTORE_JSON_START')
+      const rEnd = lines.indexOf('RESTORE_JSON_END')
+      let restoredPolicy = null
+      if (rStart !== -1 && rEnd > rStart) {
+        try { restoredPolicy = JSON.parse(lines.slice(rStart + 1, rEnd).join('')) } catch {}
+      }
+      return { success: lines.some(l => l.trim() === 'SUCCESS'), policy: restoredPolicy }
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('backup:delete', async (_, filename) => {
+    try {
+      const filepath = path.join(getBackupDir(), path.basename(filename))
+      if (fs.existsSync(filepath)) fs.unlinkSync(filepath)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('backup:openDir', async () => {
+    const dir = getBackupDir()
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    await shell.openPath(dir)
+    return { success: true }
   })
 
   // Report: audit CA policies
