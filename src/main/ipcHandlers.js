@@ -1252,14 +1252,27 @@ async function generateDocxBuffer(orgName, policies, date, nameMap = {}, recomme
 let _win = null
 let _handlersRegistered = false
 
-// Strip read-only Graph fields and normalize PascalCase → camelCase for POST restore
+// Strip read-only Graph fields and normalize PascalCase → camelCase for POST restore.
+// Empty arrays are dropped — Graph rejects them in CA policy POST bodies.
+// @odata.type from AdditionalProperties is preserved (needed for polymorphic types).
 function cleanPolicyForRestore(policy) {
   const TOP_STRIP = new Set(['id', 'Id', 'createdDateTime', 'CreatedDateTime', 'modifiedDateTime', 'ModifiedDateTime', 'templateId', 'TemplateId'])
   const META_STRIP = new Set(['AdditionalProperties', 'BackingStore'])
   function clean(v, topLevel) {
-    if (Array.isArray(v)) return v.map(item => clean(item, false))
+    if (Array.isArray(v)) {
+      const cleaned = v.map(item => clean(item, false)).filter(item => item !== null && item !== undefined)
+      return cleaned.length > 0 ? cleaned : null  // null causes parent to drop the key
+    }
     if (v && typeof v === 'object') {
-      const extra = (v.AdditionalProperties && typeof v.AdditionalProperties === 'object') ? v.AdditionalProperties : {}
+      // Preserve @odata.type (polymorphic hints) but drop response-only OData keys
+      const extra = {}
+      if (v.AdditionalProperties && typeof v.AdditionalProperties === 'object') {
+        for (const [k, val] of Object.entries(v.AdditionalProperties)) {
+          if (k !== '@odata.context' && k !== '@odata.nextLink' && k !== '@odata.count') {
+            extra[k] = val
+          }
+        }
+      }
       const result = {}
       for (const [k, val] of Object.entries(v)) {
         if (META_STRIP.has(k) || k.startsWith('@')) continue
@@ -1268,7 +1281,8 @@ function cleanPolicyForRestore(policy) {
         const cleanVal = clean(val, false)
         if (cleanVal !== null && cleanVal !== undefined) result[cleanKey] = cleanVal
       }
-      return { ...result, ...extra }
+      const merged = { ...result, ...extra }
+      return Object.keys(merged).length > 0 ? merged : null
     }
     return v
   }
@@ -1668,28 +1682,45 @@ try {
       const cleaned = cleanPolicyForRestore(policy)
       const b64 = Buffer.from(JSON.stringify(cleaned)).toString('base64')
       const script = `
-try {
-  $body = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64}'))
-  $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies" -Body $body -ContentType 'application/json' -ErrorAction Stop
-  Write-Output "RESTORE_JSON_START"
-  if ($result) { $result | ConvertTo-Json -Depth 10 -Compress } else { Write-Output '{}' }
-  Write-Output "RESTORE_JSON_END"
-  Write-Output "SUCCESS"
-} catch {
-  $errMsg = $_.Exception.Message
-  $detail = ''
+$ctx = Get-MgContext
+$scopes = if ($ctx -and $ctx.Scopes) { @($ctx.Scopes) } else { @() }
+if (-not ($scopes -contains 'Policy.ReadWrite.ConditionalAccess')) {
+  Write-Output "ERROR_NO_SCOPE: Token lacks Policy.ReadWrite.ConditionalAccess. Disconnect and reconnect to re-authenticate."
+} else {
   try {
-    $edm = $_.ErrorDetails.Message
-    if ($edm) {
-      $parsed = $edm | ConvertFrom-Json -ErrorAction SilentlyContinue
-      if ($parsed -and $parsed.error) { $detail = "$($parsed.error.code): $($parsed.error.message)" }
-      else { $detail = $edm }
+    $body = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64}'))
+    $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies" -Body $body -ContentType 'application/json' -ErrorAction Stop
+    Write-Output "RESTORE_JSON_START"
+    if ($result) { $result | ConvertTo-Json -Depth 10 -Compress } else { Write-Output '{}' }
+    Write-Output "RESTORE_JSON_END"
+    Write-Output "SUCCESS"
+  } catch {
+    $errMsg = $_.Exception.Message
+    $detail = ''
+    try {
+      $edm = $_.ErrorDetails.Message
+      if ($edm) {
+        $parsed = $edm | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($parsed -and $parsed.error) { $detail = "$($parsed.error.code): $($parsed.error.message)" }
+        else { $detail = $edm }
+      }
+    } catch {}
+    if ($errMsg -match '403|Forbidden') {
+      Write-Output "ERROR_403: $detail"
+    } else {
+      Write-Output "ERROR: $errMsg$(if ($detail) { ' | ' + $detail } else { '' })"
     }
-  } catch {}
-  Write-Output "ERROR: $errMsg$(if ($detail) { ' | ' + $detail } else { '' })"
+  }
 }`
       const lines = []
       await psSession.run(script, l => lines.push(l), 60000)
+      const noScope = lines.find(l => l.startsWith('ERROR_NO_SCOPE:'))
+      if (noScope) return { success: false, error: noScope.slice('ERROR_NO_SCOPE:'.length).trim() }
+      const err403 = lines.find(l => l.startsWith('ERROR_403:'))
+      if (err403) {
+        const detail = err403.slice('ERROR_403:'.length).trim()
+        return { success: false, error: `Access denied (403).${detail ? ` ${detail}.` : ''} Try disconnecting and reconnecting to get a fresh token.` }
+      }
       const errorLine = lines.find(l => l.startsWith('ERROR:'))
       if (errorLine) return { success: false, error: errorLine.slice('ERROR:'.length).trim() }
       const rStart = lines.indexOf('RESTORE_JSON_START')
