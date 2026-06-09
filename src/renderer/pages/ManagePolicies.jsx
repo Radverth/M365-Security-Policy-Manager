@@ -223,6 +223,7 @@ function BackupRestoreModal({ open, onClose }) {
   const [loadingBackup, setLoadingBackup] = useState(false)
   const [selectedPolicies, setSelectedPolicies] = useState(new Set())
   const [restoring, setRestoring] = useState(false)
+  const [restoreError, setRestoreError] = useState(null)
   const [view, setView] = useState('list')
 
   useEffect(() => {
@@ -230,6 +231,7 @@ function BackupRestoreModal({ open, onClose }) {
       setView('list')
       setSelectedBackup(null)
       setSelectedPolicies(new Set())
+      setRestoreError(null)
       fetchBackups()
     }
   }, [open])
@@ -264,25 +266,33 @@ function BackupRestoreModal({ open, onClose }) {
   const handleRestore = async () => {
     if (!selectedBackup || selectedPolicies.size === 0) return
     setRestoring(true)
+    setRestoreError(null)
     const toRestore = (selectedBackup.policies || []).filter(p => selectedPolicies.has(p.Id || p.id))
     let successCount = 0
-    const failedNames = []
+    const failures = []
     for (const policy of toRestore) {
       const result = await window.api.backup.restore(policy)
       if (result.success) {
         successCount++
       } else {
-        failedNames.push(policy.DisplayName || policy.displayName || 'Unknown policy')
+        const name = policy.DisplayName || policy.displayName || 'Unknown policy'
+        failures.push({ name, error: result.error || 'Unknown error' })
       }
     }
     if (successCount > 0) {
       addNotification(`Restored ${successCount} polic${successCount === 1 ? 'y' : 'ies'} successfully`, 'success')
     }
-    if (failedNames.length > 0) {
-      addNotification(`Failed to restore: ${failedNames.join(', ')}`, 'error')
+    if (failures.length > 0) {
+      // Surface the first (most informative) error inline so the user can act on it
+      const firstErr = failures[0].error
+      setRestoreError(
+        failures.length === 1
+          ? `Failed to restore "${failures[0].name}": ${firstErr}`
+          : `${failures.length} policies failed. First error: ${firstErr}`
+      )
     }
     setRestoring(false)
-    if (failedNames.length === 0) onClose()
+    if (failures.length === 0) onClose()
   }
 
   const handleDeleteBackup = async (backup, e) => {
@@ -457,6 +467,15 @@ function BackupRestoreModal({ open, onClose }) {
               )
             })}
           </div>
+
+          {restoreError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 flex gap-3">
+              <svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              <p className="text-xs text-red-800">{restoreError}</p>
+            </div>
+          )}
 
           <div className="flex justify-between items-center pt-3 border-t border-gray-100">
             <Button variant="secondary" onClick={() => setView('list')}>Back</Button>
