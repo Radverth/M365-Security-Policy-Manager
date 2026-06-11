@@ -5,6 +5,7 @@ import Badge from '../components/Badge'
 import Button from '../components/Button'
 import StatusIndicator from '../components/StatusIndicator'
 import Tooltip from '../components/Tooltip'
+import ManualInstallModal from '../components/ManualInstallModal'
 
 const isLinux = typeof navigator !== 'undefined' && navigator.platform?.toLowerCase().includes('linux')
 const isWin = typeof navigator !== 'undefined' && navigator.userAgent?.includes('Windows')
@@ -26,15 +27,21 @@ export default function Modules() {
   } = useStore()
   const [installing, setInstalling] = useState(new Set())
   const [installingPs, setInstallingPs] = useState(false)
+  const [manualInstall, setManualInstall] = useState(null)
 
   useEffect(() => {
     loadModules()
   }, [])
 
-  function notifyResult(resultLogs, successMsg) {
+  function notifyResult(resultLogs, successMsg, requestedModules) {
     const errors = resultLogs.filter(l => l.startsWith('ERROR:'))
     if (errors.length > 0) {
       addNotification(`Operation failed — check output below for details`, 'error')
+      // PS error lines look like "ERROR: <module> - <message>"; fall back to
+      // everything requested when the failure wasn't tied to a specific module
+      const errored = new Set(errors.map(l => l.match(/^ERROR:\s+(\S+)\s+-/)?.[1]).filter(Boolean))
+      const failed = (requestedModules || []).filter(m => errored.has(m))
+      setManualInstall({ modules: failed.length ? failed : (requestedModules || []) })
     } else if (resultLogs.some(l => l.startsWith('SUCCESS:'))) {
       addNotification(successMsg, 'success')
     } else {
@@ -48,10 +55,11 @@ export default function Modules() {
     setModuleOpInProgress(true)
     try {
       const result = await window.api.modules.install([moduleName])
-      notifyResult(result || [], `${moduleName} installed successfully`)
+      notifyResult(result || [], `${moduleName} installed successfully`, [moduleName])
       await loadModules()
     } catch (err) {
       addNotification(`Install failed: ${err.message}`, 'error')
+      setManualInstall({ modules: [moduleName] })
     } finally {
       setInstalling((s) => { const ns = new Set(s); ns.delete(moduleName); return ns })
       setModuleOpInProgress(false)
@@ -64,10 +72,11 @@ export default function Modules() {
     setModuleOpInProgress(true)
     try {
       const result = await window.api.modules.update([moduleName])
-      notifyResult(result || [], `${moduleName} updated successfully`)
+      notifyResult(result || [], `${moduleName} updated successfully`, [moduleName])
       await loadModules()
     } catch (err) {
       addNotification(`Update failed: ${err.message}`, 'error')
+      setManualInstall({ modules: [moduleName] })
     } finally {
       setInstalling((s) => { const ns = new Set(s); ns.delete(moduleName); return ns })
       setModuleOpInProgress(false)
@@ -81,10 +90,11 @@ export default function Modules() {
     setModuleOpInProgress(true)
     try {
       const result = await window.api.modules.install(toInstall)
-      notifyResult(result || [], 'All missing modules installed successfully')
+      notifyResult(result || [], 'All missing modules installed successfully', toInstall)
       await loadModules()
     } catch (err) {
       addNotification(`Install all failed: ${err.message}`, 'error')
+      setManualInstall({ modules: toInstall })
     } finally {
       setModuleOpInProgress(false)
     }
@@ -97,10 +107,11 @@ export default function Modules() {
     setModuleOpInProgress(true)
     try {
       const result = await window.api.modules.update(toUpdate)
-      notifyResult(result || [], 'All modules updated successfully')
+      notifyResult(result || [], 'All modules updated successfully', toUpdate)
       await loadModules()
     } catch (err) {
       addNotification(`Update all failed: ${err.message}`, 'error')
+      setManualInstall({ modules: toUpdate })
     } finally {
       setModuleOpInProgress(false)
     }
@@ -263,6 +274,8 @@ export default function Modules() {
       </Card>
 
       {/* Log panel */}
+
+      <ManualInstallModal info={manualInstall} onDismiss={() => setManualInstall(null)} />
     </div>
   )
 }
