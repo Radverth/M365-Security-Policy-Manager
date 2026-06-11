@@ -925,7 +925,7 @@ function buildPolicyScript(policy, config, prefix) {
 function buildModuleImports(graph, exo, ipps) {
   const lines = []
   if (graph) lines.push(
-    `if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) { Write-Output "ERROR: Microsoft.Graph module not found - install it on the Modules page"; exit 1 }`,
+    `if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) { Write-Output "ERROR: Microsoft Graph modules not found - install them on the Modules page"; exit 1 }`,
     `Import-Module Microsoft.Graph.Authentication -ErrorAction Stop`,
     `Import-Module Microsoft.Graph.Identity.SignIns -ErrorAction SilentlyContinue`,
     `Import-Module Microsoft.Graph.DeviceManagement -ErrorAction SilentlyContinue`

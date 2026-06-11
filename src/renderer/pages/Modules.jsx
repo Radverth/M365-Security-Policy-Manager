@@ -13,6 +13,7 @@ function statusBadge(status) {
   switch (status) {
     case 'up_to_date': return <Badge variant="success">Up to Date</Badge>
     case 'update_available': return <Badge variant="warning">Update Available</Badge>
+    case 'update_unknown': return <Badge variant="neutral">Installed (update check failed)</Badge>
     case 'not_installed': return <Badge variant="error">Not Installed</Badge>
     default: return <Badge variant="neutral">Unknown</Badge>
   }
@@ -33,7 +34,7 @@ export default function Modules() {
   function notifyResult(resultLogs, successMsg) {
     const errors = resultLogs.filter(l => l.startsWith('ERROR:'))
     if (errors.length > 0) {
-      addNotification(`Install failed — check output below for details`, 'error')
+      addNotification(`Operation failed — check output below for details`, 'error')
     } else if (resultLogs.some(l => l.startsWith('SUCCESS:'))) {
       addNotification(successMsg, 'success')
     } else {

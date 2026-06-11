@@ -9,15 +9,51 @@ function invalidateModuleCache() {
   _moduleStatusCache = null
 }
 
+// Only the Graph sub-modules the app actually uses — the Microsoft.Graph
+// meta-module pulls in ~40 sub-modules and takes 5-15 minutes to install.
 const REQUIRED_MODULES = [
   { name: 'Microsoft.Graph.Authentication', description: 'Microsoft Graph authentication and connection management' },
-  { name: 'Microsoft.Graph', description: 'Core Graph API access for policy creation' },
   { name: 'Microsoft.Graph.Identity.SignIns', description: 'Conditional Access policy management' },
+  { name: 'Microsoft.Graph.Identity.DirectoryManagement', description: 'Directory roles, organisation and domain lookups' },
+  { name: 'Microsoft.Graph.Users', description: 'User lookups and updates' },
+  { name: 'Microsoft.Graph.Groups', description: 'Group lookups for policy assignment' },
   { name: 'Microsoft.Graph.DeviceManagement', description: 'Intune / device compliance policies' },
   { name: 'ExchangeOnlineManagement', description: 'Exchange Online policies' },
 ]
 
-async function getModuleStatus(win) {
+function validateModuleNames(moduleNames) {
+  if (!Array.isArray(moduleNames) || moduleNames.length === 0) {
+    throw new Error('No modules specified')
+  }
+  const known = new Set(REQUIRED_MODULES.map(m => m.name))
+  const unknown = moduleNames.filter(n => !known.has(n))
+  if (unknown.length > 0) {
+    throw new Error(`Unknown module name(s): ${unknown.join(', ')}`)
+  }
+}
+
+function unknownModuleStatus() {
+  return REQUIRED_MODULES.map(m => ({
+    Name: m.name,
+    description: m.description,
+    Installed: false,
+    InstalledVersion: null,
+    LatestVersion: null,
+    Status: 'unknown',
+  }))
+}
+
+// Windows PowerShell 5 defaults to TLS 1.0, which PSGallery rejects.
+// Note: $IsWindows does not exist on WinPS5 — test PSEdition instead.
+const PS_TLS12 = `
+if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    } catch {}
+}
+`
+
+async function getModuleStatus() {
   const now = Date.now()
   if (_moduleStatusCache && (now - _moduleStatusCacheAt) < MODULE_CACHE_TTL_MS) {
     return _moduleStatusCache
@@ -26,6 +62,7 @@ async function getModuleStatus(win) {
   const moduleNames = REQUIRED_MODULES.map(m => m.name)
   const script = `
 $ProgressPreference = 'SilentlyContinue'
+${PS_TLS12}
 $moduleNames = @(${moduleNames.map(n => `'${n}'`).join(',')})
 $results = @()
 foreach ($name in $moduleNames) {
@@ -46,10 +83,19 @@ foreach ($name in $moduleNames) {
 
     $status = 'not_installed'
     if ($installed) {
-        if ($latest -and $latest.Version -gt $installed.Version) {
-            $status = 'update_available'
+        if ($latest) {
+            # Cast both sides — depending on the PowerShellGet version these can be
+            # strings, and string -gt compares lexically ('10.0' -lt '9.0').
+            $newer = $false
+            try {
+                $newer = [version]$latest.Version -gt [version]$installed.Version
+            } catch {
+                $newer = $latest.Version.ToString() -ne $installed.Version.ToString()
+            }
+            $status = if ($newer) { 'update_available' } else { 'up_to_date' }
         } else {
-            $status = 'up_to_date'
+            # Gallery unreachable — don't claim up to date when we couldn't check
+            $status = 'update_unknown'
         }
     }
 
@@ -78,28 +124,23 @@ $results | ConvertTo-Json -Depth 3
       return result
     }
   } catch {}
-  return REQUIRED_MODULES.map(m => ({
-    Name: m.name,
-    description: m.description,
-    Installed: false,
-    InstalledVersion: null,
-    LatestVersion: null,
-    Status: 'unknown',
-  }))
+  return unknownModuleStatus()
 }
 
 const PS_SILENT_PREFS = `
 $ProgressPreference   = 'SilentlyContinue'
 $VerbosePreference    = 'SilentlyContinue'
 $InformationPreference = 'SilentlyContinue'
+$WarningPreference    = 'SilentlyContinue'
 `
 
 const BOOTSTRAP = `
 $psEd = $PSVersionTable.PSEdition  # 'Desktop' = WinPS5, 'Core' = PS7+
 Write-Output "SETUP: PowerShell $($PSVersionTable.PSVersion) ($psEd)"
 
-if ($IsWindows -and $psEd -eq 'Desktop') {
-    # Windows PowerShell 5 only — needs NuGet provider + TLS 1.2 bootstrap
+if ($psEd -eq 'Desktop') {
+    # Windows PowerShell 5 only ('Desktop' edition only exists on Windows;
+    # $IsWindows is not defined on WinPS5) — needs NuGet provider + TLS 1.2 bootstrap
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     } catch {}
@@ -123,16 +164,22 @@ if ($IsWindows -and $psEd -eq 'Desktop') {
 }
 `
 
-async function installModules(moduleNames, onData, onError) {
-  invalidateModuleCache()
-  const script = `
+// $IsLinux/$IsWindows don't exist on WinPS5, so check PSEdition first
+const SETUP_PREAMBLE = `
 ${PS_SILENT_PREFS}
-Write-Output "SETUP: Starting on $(if ($IsLinux) { 'Linux' } elseif ($IsWindows) { 'Windows' } else { 'macOS' })..."
+Write-Output "SETUP: Starting on $(if ($PSVersionTable.PSEdition -eq 'Desktop' -or $IsWindows) { 'Windows' } elseif ($IsLinux) { 'Linux' } else { 'macOS' })..."
 ${BOOTSTRAP}
 Write-Output "SETUP: Package source ready"
+`
+
+async function installModules(moduleNames, onData, onError) {
+  validateModuleNames(moduleNames)
+  invalidateModuleCache()
+  const script = `
+${SETUP_PREAMBLE}
 $modules = @(${moduleNames.map(n => `'${n}'`).join(',')})
 foreach ($mod in $modules) {
-    Write-Output "INSTALLING: $mod (large modules like Microsoft.Graph may take 5-15 minutes)..."
+    Write-Output "INSTALLING: $mod (this may take a few minutes)..."
     try {
         Install-Module -Name $mod -Scope CurrentUser -Force -AllowClobber -SkipPublisherCheck -Confirm:$false -Repository PSGallery -ErrorAction Stop
         Write-Output "SUCCESS: $mod installed"
@@ -146,20 +193,42 @@ Write-Output "DONE"
 }
 
 async function updateModules(moduleNames, onData, onError) {
+  validateModuleNames(moduleNames)
   invalidateModuleCache()
   const script = `
-${PS_SILENT_PREFS}
-Write-Output "SETUP: Starting on $(if ($IsLinux) { 'Linux' } elseif ($IsWindows) { 'Windows' } else { 'macOS' })..."
-${BOOTSTRAP}
-Write-Output "SETUP: Package source ready"
+${SETUP_PREAMBLE}
 $modules = @(${moduleNames.map(n => `'${n}'`).join(',')})
 foreach ($mod in $modules) {
-    Write-Output "UPDATING: $mod (large modules may take 5-15 minutes)..."
+    Write-Output "UPDATING: $mod (this may take a few minutes)..."
+    $updated = $false
     try {
         Update-Module -Name $mod -Force -Confirm:$false -ErrorAction Stop
-        Write-Output "SUCCESS: $mod updated"
+        $updated = $true
     } catch {
-        Write-Output "ERROR: $mod - $($_.Exception.Message)"
+        # Update-Module only works for modules installed via Install-Module in the
+        # same scope — fall back to a fresh CurrentUser install for side-loaded or
+        # admin-installed (AllUsers) modules.
+        Write-Output "INFO: Update-Module failed for $mod, retrying with Install-Module..."
+        try {
+            Install-Module -Name $mod -Scope CurrentUser -Force -AllowClobber -SkipPublisherCheck -Confirm:$false -Repository PSGallery -ErrorAction Stop
+            $updated = $true
+        } catch {
+            Write-Output "ERROR: $mod - $($_.Exception.Message)"
+        }
+    }
+    if ($updated) {
+        Write-Output "SUCCESS: $mod updated"
+        # Update-Module installs side-by-side and never removes old versions,
+        # which silently accumulate — clean up everything but the newest.
+        try {
+            Get-InstalledModule -Name $mod -AllVersions -ErrorAction Stop |
+                Sort-Object { [version]$_.Version } -Descending |
+                Select-Object -Skip 1 |
+                ForEach-Object {
+                    Write-Output "CLEANUP: Removing $mod $($_.Version)..."
+                    Uninstall-Module -Name $mod -RequiredVersion $_.Version -Force -ErrorAction SilentlyContinue
+                }
+        } catch {}
     }
 }
 Write-Output "DONE"
@@ -167,4 +236,4 @@ Write-Output "DONE"
   return runScript(script, onData, onError)
 }
 
-module.exports = { getModuleStatus, installModules, updateModules, invalidateModuleCache, REQUIRED_MODULES }
+module.exports = { getModuleStatus, installModules, updateModules, invalidateModuleCache, unknownModuleStatus, REQUIRED_MODULES }

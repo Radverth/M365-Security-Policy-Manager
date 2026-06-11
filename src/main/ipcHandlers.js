@@ -1,6 +1,6 @@
 const { ipcMain, app, shell, dialog, BrowserWindow } = require('electron')
 const { checkPowerShell, runScript } = require('./powershell')
-const { getModuleStatus, installModules, updateModules } = require('./moduleManager')
+const { getModuleStatus, installModules, updateModules, unknownModuleStatus } = require('./moduleManager')
 const itGlue = require('./itGlue')
 const { buildScript, buildConnectGraph, buildPoliciesScript, needsExo, needsIpps } = require('./policyBuilder')
 const store = require('./store')
@@ -1314,27 +1314,34 @@ function registerIpcHandlers(win) {
   // Module status
   ipcMain.handle('modules:getStatus', async () => {
     try {
-      return await getModuleStatus(_win)
+      return await getModuleStatus()
     } catch (err) {
-      return []
+      logger.error(`modules:getStatus failed: ${err.message}`)
+      return unknownModuleStatus()
     }
   })
+
+  // The install/update scripts can outlive the window — guard sends
+  const safeSend = (channel, line) => {
+    if (_win && !_win.isDestroyed()) _win.webContents.send(channel, line)
+  }
 
   // Module install
   ipcMain.handle('modules:install', async (_, moduleNames) => {
     logger.info(`IPC: modules:install [${moduleNames.join(', ')}]`)
     const logs = []
-    await installModules(
+    const { exitCode } = await installModules(
       moduleNames,
       (line) => {
         logs.push(line)
-        _win.webContents.send('ps:output', line)
+        safeSend('ps:output', line)
       },
       (line) => {
         logs.push(`ERROR: ${line}`)
-        _win.webContents.send('ps:error', line)
+        safeSend('ps:error', line)
       }
     )
+    if (exitCode !== 0) logs.push(`ERROR: PowerShell exited with code ${exitCode}`)
     return logs
   })
 
@@ -1342,17 +1349,18 @@ function registerIpcHandlers(win) {
   ipcMain.handle('modules:update', async (_, moduleNames) => {
     logger.info(`IPC: modules:update [${moduleNames.join(', ')}]`)
     const logs = []
-    await updateModules(
+    const { exitCode } = await updateModules(
       moduleNames,
       (line) => {
         logs.push(line)
-        _win.webContents.send('ps:output', line)
+        safeSend('ps:output', line)
       },
       (line) => {
         logs.push(`ERROR: ${line}`)
-        _win.webContents.send('ps:error', line)
+        safeSend('ps:error', line)
       }
     )
+    if (exitCode !== 0) logs.push(`ERROR: PowerShell exited with code ${exitCode}`)
     return logs
   })
 
