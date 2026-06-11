@@ -58,7 +58,7 @@ export default function ManualInstallModal({ info, onDismiss }) {
           {/* Steps */}
           <ol className="space-y-2">
             {[
-              <>Open PowerShell — on Windows, press <span className="font-semibold">Start</span> and type <span className="font-semibold">PowerShell</span>; on macOS/Linux, run <span className="font-mono font-semibold">pwsh</span> in a terminal</>,
+              <>Open PowerShell — on Windows, press <span className="font-semibold">Start</span> and type <span className="font-semibold">PowerShell</span>; on Linux, run <span className="font-mono font-semibold">pwsh</span> in a terminal</>,
               <>Paste the command below and press <span className="font-semibold">Enter</span>, then wait for it to finish</>,
               <>Come back here and click <span className="font-semibold">Check Status</span></>,
             ].map((step, i) => (
