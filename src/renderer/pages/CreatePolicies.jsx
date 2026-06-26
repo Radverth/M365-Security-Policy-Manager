@@ -251,7 +251,31 @@ function StepInteractive({ org, setOrg, credentials, setCredentials, useDeviceCo
 }
 
 // ── Step 2: Configure Prefix ──────────────────────────────────────────────────
-function StepConfigurePrefix({ usePrefix, setUsePrefix, prefix, setPrefix, defaultPrefix, orgName }) {
+const POLICY_MODE_OPTIONS = [
+  {
+    id: 'enabled',
+    label: 'Active',
+    desc: 'Policies are enforced immediately upon creation.',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'enabledForReportingButNotEnforced',
+    label: 'Report-Only',
+    desc: 'Monitor sign-in impact without blocking users.',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+    ),
+  },
+]
+
+function StepConfigurePrefix({ usePrefix, setUsePrefix, prefix, setPrefix, defaultPrefix, orgName, policyMode, setPolicyMode }) {
   const effectiveDefault = orgName || defaultPrefix || ''
   const preview = usePrefix && prefix ? `${prefix} — CA001: Require MFA for All Users` : 'CA001: Require MFA for All Users'
 
@@ -292,6 +316,35 @@ function StepConfigurePrefix({ usePrefix, setUsePrefix, prefix, setPrefix, defau
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
         <p className="text-xs font-medium text-gray-500 mb-1">Policy Name Preview</p>
         <p className="text-sm font-mono text-gray-800">{preview}</p>
+      </div>
+
+      {/* Policy mode */}
+      <div>
+        <p className="text-sm font-medium text-gray-700 mb-1">Conditional Access policy state</p>
+        <p className="text-xs text-gray-500 mb-3">Applies to all CA policies. Override individual policies in the Configure step.</p>
+        <div className="grid grid-cols-2 gap-3">
+          {POLICY_MODE_OPTIONS.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => setPolicyMode(m.id)}
+              className={[
+                'relative flex flex-col items-start gap-1.5 px-4 py-3 rounded-lg border-2 text-left transition-all',
+                policyMode === m.id
+                  ? 'border-navy bg-navy-50'
+                  : 'border-gray-200 hover:border-gray-300 bg-white',
+              ].join(' ')}
+            >
+              <div className={`flex items-center gap-2 ${policyMode === m.id ? 'text-navy' : 'text-gray-600'}`}>
+                {m.icon}
+                <span className="text-sm font-semibold">{m.label}</span>
+              </div>
+              <span className="text-xs text-gray-500 leading-snug">{m.desc}</span>
+              {policyMode === m.id && (
+                <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-navy" />
+              )}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )
@@ -513,7 +566,7 @@ function StepSelectPolicies({ selected, setSelected }) {
 // (inline in wizard body below)
 
 // ── Step 5: Review ────────────────────────────────────────────────────────────
-function StepReview({ authMode, org, credentials, prefix, usePrefix, selectedIds, policyConfigs }) {
+function StepReview({ authMode, org, credentials, prefix, usePrefix, selectedIds, policyConfigs, policyMode }) {
   const selectedPolicies = POLICIES.filter((p) => selectedIds.includes(p.id))
   const byCategory = selectedPolicies.reduce((acc, p) => {
     if (!acc[p.category]) acc[p.category] = []
@@ -524,6 +577,11 @@ function StepReview({ authMode, org, credentials, prefix, usePrefix, selectedIds
   const authLabel = { itglue: 'IT Glue → WAM', interactive: 'WAM / Browser' }[authMode]
 
   const customised = Object.keys(policyConfigs || {}).filter(id => selectedIds.includes(id)).length
+
+  const modeLabel = policyMode === 'enabledForReportingButNotEnforced' ? 'Report-Only' : 'Active'
+  const modeVariant = policyMode === 'enabledForReportingButNotEnforced' ? 'warning' : 'success'
+
+  const caCount = selectedPolicies.filter(p => p.category === 'Conditional Access').length
 
   return (
     <div className="space-y-5">
@@ -557,9 +615,20 @@ function StepReview({ authMode, org, credentials, prefix, usePrefix, selectedIds
         </div>
       )}
 
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
-        <strong>{selectedIds.length} policies</strong> will be created across {Object.keys(byCategory).length} categories.
-        {customised > 0 && <span className="ml-2 text-navy font-medium">{customised} with custom configuration.</span>}
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800 space-y-1">
+        <p>
+          <strong>{selectedIds.length} policies</strong> will be created across {Object.keys(byCategory).length} categories.
+          {customised > 0 && <span className="ml-2 text-navy font-medium">{customised} with custom configuration.</span>}
+        </p>
+        {caCount > 0 && (
+          <p className="flex items-center gap-2">
+            {caCount} Conditional Access {caCount === 1 ? 'policy' : 'policies'} will be created as{' '}
+            <Badge variant={modeVariant}>{modeLabel}</Badge>
+            {policyMode === 'enabledForReportingButNotEnforced' && (
+              <span className="text-amber-700">— users will not be blocked.</span>
+            )}
+          </p>
+        )}
       </div>
 
       <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
@@ -569,14 +638,15 @@ function StepReview({ authMode, org, credentials, prefix, usePrefix, selectedIds
             <div className="space-y-1">
               {policies.map((p) => {
                 const cfg = policyConfigs?.[p.id] || {}
-                const stateVal = cfg.state || 'enabled'
-                const stateLabel = { enabled: 'On', disabled: 'Off', enabledForReportingButNotEnforced: 'Report' }[stateVal] || stateVal
-                const stateVariant = { enabled: 'success', disabled: 'neutral', enabledForReportingButNotEnforced: 'warning' }[stateVal] || 'neutral'
+                const effectiveState = cfg.state || (p.category === 'Conditional Access' ? policyMode : 'enabled')
+                const stateLabel = { enabled: 'Active', disabled: 'Off', enabledForReportingButNotEnforced: 'Report-Only' }[effectiveState] || effectiveState
+                const stateVariant = { enabled: 'success', disabled: 'neutral', enabledForReportingButNotEnforced: 'warning' }[effectiveState] || 'neutral'
+                const showState = p.category === 'Conditional Access'
                 return (
                   <div key={p.id} className="flex items-center gap-3 py-1.5 px-3 rounded-md hover:bg-gray-50">
                     <span className="text-xs font-mono text-gray-400 w-12 flex-shrink-0">{p.id}</span>
                     <span className="text-sm text-gray-800 flex-1">{p.name}</span>
-                    <Badge variant={stateVariant}>{stateLabel}</Badge>
+                    {showState && <Badge variant={stateVariant}>{stateLabel}</Badge>}
                     {severityBadge(p.severity)}
                   </div>
                 )
@@ -650,6 +720,7 @@ export default function CreatePolicies() {
   const [credentials, setCredentials] = useState(null)
   const [usePrefix, setUsePrefix] = useState(!!settings.defaultPolicyPrefix)
   const [prefix, setPrefix] = useState(settings.defaultPolicyPrefix || '')
+  const [policyMode, setPolicyMode] = useState('enabled')
   const [selectedIds, setSelectedIds] = useState(baselinePolicyIds ?? [])
   const [policyConfigs, setPolicyConfigs] = useState({})
   const [deployLogs, setDeployLogs] = useState([])
@@ -711,13 +782,22 @@ export default function CreatePolicies() {
     setDeployLogs([])
     setDeployResults({})
     const selectedPolicies = POLICIES.filter((p) => selectedIds.includes(p.id))
+
+    // Apply policyMode as the default state for CA policies without an explicit state override
+    const effectiveConfigs = { ...policyConfigs }
+    selectedPolicies.forEach((p) => {
+      if (p.category === 'Conditional Access' && !effectiveConfigs[p.id]?.state) {
+        effectiveConfigs[p.id] = { ...(effectiveConfigs[p.id] || {}), state: policyMode }
+      }
+    })
+
     try {
       const result = await window.api.policies.create({
         policies: selectedPolicies,
         credentials: usingSession ? { interactive: true } : credentials,
         prefix: usePrefix ? prefix : '',
         authMode: usingSession ? 'interactive' : authMode,
-        policyConfigs,
+        policyConfigs: effectiveConfigs,
         useDeviceCode: usingSession ? true : useDeviceCode,
       })
       setDeployResults(result.results || {})
@@ -740,6 +820,7 @@ export default function CreatePolicies() {
   const reset = () => {
     setStep(1)
     if (!usingSession) { setOrg(null); setCredentials(null) }
+    setPolicyMode('enabled')
     setPolicyConfigs({})
     setDeployLogs([]); setDeployResults({})
   }
@@ -808,6 +889,7 @@ export default function CreatePolicies() {
               prefix={prefix} setPrefix={setPrefix}
               defaultPrefix={settings.defaultPolicyPrefix}
               orgName={org?.name}
+              policyMode={policyMode} setPolicyMode={setPolicyMode}
             />
           )}
           {contentStep === 3 && <StepSelectPolicies selected={selectedIds} setSelected={setSelectedIds} />}
@@ -826,6 +908,7 @@ export default function CreatePolicies() {
               prefix={prefix} usePrefix={usePrefix}
               selectedIds={selectedIds}
               policyConfigs={policyConfigs}
+              policyMode={policyMode}
             />
           )}
           {contentStep === 6 && (
