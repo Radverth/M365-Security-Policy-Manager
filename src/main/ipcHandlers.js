@@ -1793,6 +1793,10 @@ if (-not ($scopes -contains 'Policy.ReadWrite.ConditionalAccess')) {
   Write-Output "POLICY_JSON_START"
   $policies | ConvertTo-Json -Depth 10 -Compress
   Write-Output "POLICY_JSON_END"
+  try {
+    $org = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization?\`$select=displayName" -ErrorAction SilentlyContinue
+    if ($org -and $org.value -and $org.value.Count -gt 0) { Write-Output "TENANT_NAME:$($org.value[0].displayName)" }
+  } catch {}
   Write-Output "DONE: $count"
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
@@ -1818,21 +1822,10 @@ if (-not ($scopes -contains 'Policy.ReadWrite.ConditionalAccess')) {
       const parsed = JSON.parse(json)
       const policies = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : [])
 
-      // Fetch tenant display name
+      // Extract tenant name from the combined response
       let tenantName = null
-      try {
-        const orgLines = []
-        await psSession.run(
-          `try {
-  $org = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization?\`$select=displayName" -ErrorAction SilentlyContinue
-  if ($org -and $org.value -and $org.value.Count -gt 0) { Write-Output "TENANT_NAME:$($org.value[0].displayName)" }
-} catch {}`,
-          (line) => orgLines.push(line),
-          15000
-        )
-        const nameLine = orgLines.find(l => l.startsWith('TENANT_NAME:'))
-        if (nameLine) tenantName = nameLine.slice('TENANT_NAME:'.length).trim()
-      } catch { /* best-effort */ }
+      const nameLine = lines.find(l => l.startsWith('TENANT_NAME:'))
+      if (nameLine) tenantName = nameLine.slice('TENANT_NAME:'.length).trim()
 
       // Resolve display names for all excluded users, groups, and roles
       const SPECIAL_IDS = new Set(['All', 'None', 'GuestsOrExternalUsers', 'AllTrusted'])

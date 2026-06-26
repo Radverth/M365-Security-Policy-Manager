@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } from 'react'
 import useStore from '../store'
 import { POLICIES, POLICIES_BY_CATEGORY } from '../../shared/constants'
 import ProgressStep from '../components/ProgressStep'
@@ -395,10 +395,10 @@ const SEVERITY_DOT = {
   info: 'bg-gray-400',
 }
 
-function PolicyGridItem({ p, isSelected, onToggle }) {
+const PolicyGridItem = React.memo(function PolicyGridItem({ p, isSelected, toggle }) {
   return (
     <button
-      onClick={onToggle}
+      onClick={() => toggle(p.id)}
       className={[
         'flex items-center gap-2 px-3 py-2 rounded-lg border text-left transition-colors w-full',
         isSelected
@@ -420,7 +420,7 @@ function PolicyGridItem({ p, isSelected, onToggle }) {
       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${SEVERITY_DOT[p.severity] || 'bg-gray-400'}`} title={p.severity} />
     </button>
   )
-}
+})
 
 function StepSelectPolicies({ selected, setSelected }) {
   const [activeCat, setActiveCat] = useState(null)
@@ -428,24 +428,36 @@ function StepSelectPolicies({ selected, setSelected }) {
   const selSet = useMemo(() => new Set(selected), [selected])
   const categories = Object.keys(POLICIES_BY_CATEGORY)
 
+  // Defer the expensive filter/render pass so typing the search box stays instant
+  const deferredSearch = useDeferredValue(search)
+
   const displayPolicies = useMemo(() => {
-    const q = search.toLowerCase().trim()
+    const q = deferredSearch.toLowerCase().trim()
     if (q) return POLICIES.filter(p => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q))
     if (activeCat) return POLICIES_BY_CATEGORY[activeCat] || []
     return POLICIES
-  }, [activeCat, search])
+  }, [activeCat, deferredSearch])
 
-  const groupedView = !search.trim() && !activeCat
+  const groupedView = !deferredSearch.trim() && !activeCat
 
-  function toggle(id) {
-    setSelected(s => selSet.has(id) ? s.filter(x => x !== id) : [...s, id])
-  }
+  // Stable callbacks so React.memo on PolicyGridItem actually skips re-renders
+  const toggle = useCallback((id) => {
+    setSelected(s => {
+      const set = new Set(s)
+      if (set.has(id)) { set.delete(id) } else { set.add(id) }
+      return [...set]
+    })
+  }, [setSelected])
 
-  function toggleCat(cat) {
+  const toggleCat = useCallback((cat) => {
     const ids = (POLICIES_BY_CATEGORY[cat] || []).map(p => p.id)
-    const allSel = ids.every(id => selSet.has(id))
-    setSelected(s => allSel ? s.filter(id => !ids.includes(id)) : [...new Set([...s, ...ids])])
-  }
+    setSelected(s => {
+      const set = new Set(s)
+      const allSel = ids.every(id => set.has(id))
+      if (allSel) { ids.forEach(id => set.delete(id)) } else { ids.forEach(id => set.add(id)) }
+      return [...set]
+    })
+  }, [setSelected])
 
   return (
     <div className="flex flex-col gap-3">
@@ -531,7 +543,7 @@ function StepSelectPolicies({ selected, setSelected }) {
                   </div>
                   <div className="grid grid-cols-2 gap-1.5">
                     {catPolicies.map(p => (
-                      <PolicyGridItem key={p.id} p={p} isSelected={selSet.has(p.id)} onToggle={() => toggle(p.id)} />
+                      <PolicyGridItem key={p.id} p={p} isSelected={selSet.has(p.id)} toggle={toggle} />
                     ))}
                   </div>
                 </div>
@@ -540,7 +552,7 @@ function StepSelectPolicies({ selected, setSelected }) {
           ) : (
             <div className="grid grid-cols-2 gap-1.5">
               {displayPolicies.map(p => (
-                <PolicyGridItem key={p.id} p={p} isSelected={selSet.has(p.id)} onToggle={() => toggle(p.id)} />
+                <PolicyGridItem key={p.id} p={p} isSelected={selSet.has(p.id)} toggle={toggle} />
               ))}
             </div>
           )}
