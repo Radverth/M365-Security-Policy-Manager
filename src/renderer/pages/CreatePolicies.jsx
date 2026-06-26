@@ -18,8 +18,9 @@ function severityBadge(sev) {
 }
 
 function resultBadge(status) {
-  if (status === 'success') return <Badge variant="success">Success</Badge>
+  if (status === 'success') return <Badge variant="success">Created</Badge>
   if (status === 'failure') return <Badge variant="error">Failed</Badge>
+  if (status === 'skipped') return <Badge variant="warning">Skipped</Badge>
   return <Badge variant="neutral">Pending</Badge>
 }
 
@@ -720,8 +721,15 @@ export default function CreatePolicies() {
         useDeviceCode: usingSession ? true : useDeviceCode,
       })
       setDeployResults(result.results || {})
-      const successCount = Object.values(result.results || {}).filter((v) => v === 'success').length
-      addNotification(`Deployment complete: ${successCount}/${selectedIds.length} policies created`, 'success')
+      const r = result.results || {}
+      const successCount = Object.values(r).filter((v) => v === 'success').length
+      const failureCount = Object.values(r).filter((v) => v === 'failure').length
+      const skippedCount = Object.values(r).filter((v) => v === 'skipped').length
+      const parts = [`${successCount} created`]
+      if (failureCount > 0) parts.push(`${failureCount} failed`)
+      if (skippedCount > 0) parts.push(`${skippedCount} skipped`)
+      const notifVariant = failureCount > 0 ? 'error' : (successCount > 0 ? 'success' : 'warning')
+      addNotification(`Deployment complete: ${parts.join(', ')}`, notifVariant)
     } catch (err) {
       addNotification('Deployment failed: ' + err.message, 'error')
     } finally {

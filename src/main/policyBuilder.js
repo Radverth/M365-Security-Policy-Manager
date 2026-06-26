@@ -33,8 +33,20 @@ ${indented}
     Write-Output "SUCCESS: ${id} created"
 } catch {
     $errMsg = $_.Exception.Message
-    $errDetails = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { " | $($_.ErrorDetails.Message)" } else { '' }
-    Write-Output "FAILURE: ${id} - $errMsg$errDetails"
+    $errCode = ''
+    $errDetail = ''
+    try {
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+            $errJson = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
+            if ($errJson -and $errJson.error) {
+                $errCode = " [$($errJson.error.code)]"
+                $errDetail = " | $($errJson.error.message)"
+            } else {
+                $errDetail = " | $($_.ErrorDetails.Message)"
+            }
+        }
+    } catch {}
+    Write-Output "FAILURE: ${id}$errCode - $errMsg$errDetail"
 }`
 }
 
@@ -42,12 +54,12 @@ function skipBlock(id, name, reason) {
   return `
 Write-Output "CREATING: ${id} - ${name}"
 Write-Output "INFO: ${id} - ${reason}"
-Write-Output "SUCCESS: ${id} noted"`
+Write-Output "SKIPPED: ${id} - cannot be automated"`
 }
 
 function dn(policy, prefix) {
   const base = `${policy.id}: ${policy.name}`
-  return prefix ? `${safe(prefix)} - ${base}` : base
+  return prefix ? `${prefix} - ${base}` : base
 }
 
 // ─── Connection detection ─────────────────────────────────────────────────────
@@ -231,7 +243,8 @@ function buildCAScript(policy, config, prefix) {
     return `$params = @{
     ${parts.join('\n    ')}
 }
-New-MgIdentityConditionalAccessPolicy -BodyParameter $params | Out-Null`
+$created = New-MgIdentityConditionalAccessPolicy -BodyParameter $params
+Write-Output "  CREATED: ID=$($created.Id) State=$($created.State)"`
   }
 
   switch (policy.id) {
@@ -254,7 +267,7 @@ if ($nl) {
 } else {
     $nlParams = @{ '@odata.type' = '#microsoft.graph.countryNamedLocation'; DisplayName = $nlName; CountriesAndRegions = @('GB'); IncludeUnknownCountriesAndRegions = $false }
     $nl = New-MgIdentityConditionalAccessNamedLocation -BodyParameter $nlParams
-    Write-Output "  Created named location: $nlName"
+    Write-Output "  Created named location: $nlName (ID=$($nl.Id))"
 }
 Write-Output "  Using named location ID: $($nl.Id)"
 $params = @{
@@ -262,7 +275,8 @@ $params = @{
     Conditions = @{ Users = ${allUsers()}; Applications = ${allApps}; Locations = @{ IncludeLocations = @('All'); ExcludeLocations = @($nl.Id) } }
     GrantControls = ${grantBlock}
 }
-New-MgIdentityConditionalAccessPolicy -BodyParameter $params | Out-Null`)
+$created = New-MgIdentityConditionalAccessPolicy -BodyParameter $params
+Write-Output "  CREATED: ID=$($created.Id) State=$($created.State)"`)
 
     case 'CA006': return policyBlock(policy.id, policy.name, caPolicy(allUsers(), azureMgmt, grantMfa))
 
@@ -311,7 +325,8 @@ New-MgIdentityConditionalAccessPolicy -BodyParameter $params | Out-Null`)
     Conditions = @{ Users = ${allUsers()}; Applications = @{ IncludeUserActions = @('urn:user:registersecurityinfo') } }
     GrantControls = ${grantMfa}
 }
-New-MgIdentityConditionalAccessPolicy -BodyParameter $params | Out-Null`)
+$created = New-MgIdentityConditionalAccessPolicy -BodyParameter $params
+Write-Output "  CREATED: ID=$($created.Id) State=$($created.State)"`)
 
     case 'CA020': return skipBlock(policy.id, policy.name,
       'Requires a Named Location with approved IP ranges to already exist. Create the named location in Azure portal first, then configure this policy with that location ID.')
@@ -333,7 +348,8 @@ New-MgIdentityConditionalAccessPolicy -BodyParameter $params | Out-Null`)
     Conditions = @{ Users = ${allUsers()}; Applications = ${allApps}; AuthenticationFlows = @{ TransferMethods = @('deviceCodeFlow') } }
     GrantControls = ${grantBlock}
 }
-New-MgIdentityConditionalAccessPolicy -BodyParameter $params | Out-Null`)
+$created = New-MgIdentityConditionalAccessPolicy -BodyParameter $params
+Write-Output "  CREATED: ID=$($created.Id) State=$($created.State)"`)
 
     case 'CA026': return policyBlock(policy.id, policy.name, caPolicy(adminRoles(), allApps, grantPhishRes))
 
@@ -366,7 +382,8 @@ Write-Output "  Named location ID: $($nl.Id)"`)
     Conditions = @{ Users = ${allUsers()}; Applications = ${allApps} }
     SessionControls = @{ ApplicationEnforcedRestrictions = @{ IsEnabled = $true } }
 }
-New-MgIdentityConditionalAccessPolicy -BodyParameter $params | Out-Null`)
+$created = New-MgIdentityConditionalAccessPolicy -BodyParameter $params
+Write-Output "  CREATED: ID=$($created.Id) State=$($created.State)"`)
 
     case 'CA031': return policyBlock(policy.id, policy.name, caPolicy(allUsers(), intuneApp, grantMfa))
 
@@ -405,7 +422,8 @@ New-MgIdentityConditionalAccessPolicy -BodyParameter $params | Out-Null`)
     Conditions = @{ Users = ${allUsers()}; Applications = ${allApps} }
     SessionControls = @{ ApplicationEnforcedRestrictions = @{ IsEnabled = $true } }
 }
-New-MgIdentityConditionalAccessPolicy -BodyParameter $params | Out-Null`)
+$created = New-MgIdentityConditionalAccessPolicy -BodyParameter $params
+Write-Output "  CREATED: ID=$($created.Id) State=$($created.State)"`)
 
     case 'CA043': return policyBlock(policy.id, policy.name, caPolicy(
       allUsers(), allApps, grantBlock, `; ClientAppTypes = @('other')`))
@@ -665,20 +683,24 @@ function buildENScript(policy, config, prefix) {
   const displayName = dn(policy, prefix)
 
   function winCompliance(extra) {
-    return `$params = @{ '@odata.type' = '#microsoft.graph.windows10CompliancePolicy'; DisplayName = ${psStr(displayName)}; ${extra}; scheduledActionsForRule = @() }
-New-MgDeviceManagementDeviceCompliancePolicy -BodyParameter $params | Out-Null`
+    return `$params = @{ '@odata.type' = '#microsoft.graph.windows10CompliancePolicy'; DisplayName = ${psStr(displayName)}; ${extra} }
+$created = New-MgDeviceManagementDeviceCompliancePolicy -BodyParameter $params
+Write-Output "  CREATED: ID=$($created.Id) DisplayName=$($created.DisplayName)"`
   }
   function macCompliance(extra) {
-    return `$params = @{ '@odata.type' = '#microsoft.graph.macOSCompliancePolicy'; DisplayName = ${psStr(displayName)}; ${extra}; scheduledActionsForRule = @() }
-New-MgDeviceManagementDeviceCompliancePolicy -BodyParameter $params | Out-Null`
+    return `$params = @{ '@odata.type' = '#microsoft.graph.macOSCompliancePolicy'; DisplayName = ${psStr(displayName)}; ${extra} }
+$created = New-MgDeviceManagementDeviceCompliancePolicy -BodyParameter $params
+Write-Output "  CREATED: ID=$($created.Id) DisplayName=$($created.DisplayName)"`
   }
   function iosCompliance(extra) {
-    return `$params = @{ '@odata.type' = '#microsoft.graph.iosCompliancePolicy'; DisplayName = ${psStr(displayName)}; ${extra}; scheduledActionsForRule = @() }
-New-MgDeviceManagementDeviceCompliancePolicy -BodyParameter $params | Out-Null`
+    return `$params = @{ '@odata.type' = '#microsoft.graph.iosCompliancePolicy'; DisplayName = ${psStr(displayName)}; ${extra} }
+$created = New-MgDeviceManagementDeviceCompliancePolicy -BodyParameter $params
+Write-Output "  CREATED: ID=$($created.Id) DisplayName=$($created.DisplayName)"`
   }
   function androidCompliance(extra) {
-    return `$params = @{ '@odata.type' = '#microsoft.graph.androidWorkProfileCompliancePolicy'; DisplayName = ${psStr(displayName)}; ${extra}; scheduledActionsForRule = @() }
-New-MgDeviceManagementDeviceCompliancePolicy -BodyParameter $params | Out-Null`
+    return `$params = @{ '@odata.type' = '#microsoft.graph.androidWorkProfileCompliancePolicy'; DisplayName = ${psStr(displayName)}; ${extra} }
+$created = New-MgDeviceManagementDeviceCompliancePolicy -BodyParameter $params
+Write-Output "  CREATED: ID=$($created.Id) DisplayName=$($created.DisplayName)"`
   }
 
   switch (policy.id) {
@@ -928,7 +950,8 @@ function buildModuleImports(graph, exo, ipps) {
     `if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) { Write-Output "ERROR: Microsoft Graph modules not found - install them on the Modules page"; exit 1 }`,
     `Import-Module Microsoft.Graph.Authentication -ErrorAction Stop`,
     `Import-Module Microsoft.Graph.Identity.SignIns -ErrorAction SilentlyContinue`,
-    `Import-Module Microsoft.Graph.DeviceManagement -ErrorAction SilentlyContinue`
+    `Import-Module Microsoft.Graph.DeviceManagement -ErrorAction SilentlyContinue`,
+    `Import-Module Microsoft.Graph.Identity.DirectoryManagement -ErrorAction SilentlyContinue`
   )
   if (exo) lines.push(
     `if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) { Write-Output "ERROR: ExchangeOnlineManagement module not found - install it on the Modules page"; exit 1 }`,

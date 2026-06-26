@@ -1471,7 +1471,13 @@ function registerIpcHandlers(win) {
         if (id) results[id] = 'success'
       } else if (line.startsWith('FAILURE:')) {
         const id = line.match(/[A-Z]{2}\d{3}/)?.[0]
-        if (id) results[id] = 'failure'
+        if (id) {
+          results[id] = 'failure'
+          logger.warn(`Policy ${id} FAILED: ${line}`)
+        }
+      } else if (line.startsWith('SKIPPED:')) {
+        const id = line.match(/[A-Z]{2}\d{3}/)?.[0]
+        if (id) results[id] = 'skipped'
       }
     }
 
@@ -1482,11 +1488,23 @@ function registerIpcHandlers(win) {
     // needed, run the policy blocks directly through the session — no re-auth required.
     // psSession's global stdout handler already streams every line to ps:output, so
     // parseResult must NOT re-send or each line would appear twice in the terminal.
+    const logSummary = () => {
+      const s = Object.values(results).filter(v => v === 'success').length
+      const f = Object.values(results).filter(v => v === 'failure').length
+      const k = Object.values(results).filter(v => v === 'skipped').length
+      logger.info(`policies:create complete — success=${s} failure=${f} skipped=${k} total=${policies.length}`)
+      if (f > 0) {
+        const failed = Object.entries(results).filter(([, v]) => v === 'failure').map(([id]) => id).join(', ')
+        logger.warn(`policies:create failed IDs: ${failed}`)
+      }
+    }
+
     if (psSession.alive && !hasExo && !hasIpps) {
       logger.info('IPC: policies:create — using persistent session (no re-auth)')
       _win.webContents.send('ps:output', 'CONNECTED: Using active tenant session — deploying policies...')
       const script = buildPoliciesScript(policies, prefix || '', policyConfigs || {})
       await psSession.run(script, parseResult, 300000)
+      logSummary()
       return { logs, results }
     }
 
@@ -1500,6 +1518,7 @@ function registerIpcHandlers(win) {
       (line) => _win.webContents.send('ps:error', line)
     )
 
+    logSummary()
     return { logs, results }
   })
 
