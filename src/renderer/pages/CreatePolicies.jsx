@@ -255,7 +255,7 @@ const POLICY_MODE_OPTIONS = [
   {
     id: 'enabled',
     label: 'Active',
-    desc: 'Policies are enforced immediately upon creation.',
+    desc: 'All policies are deployed and enforced immediately.',
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
@@ -265,7 +265,7 @@ const POLICY_MODE_OPTIONS = [
   {
     id: 'enabledForReportingButNotEnforced',
     label: 'Report-Only',
-    desc: 'Monitor sign-in impact without blocking users.',
+    desc: 'CA policies created in report-only mode. All other policies are skipped.',
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
@@ -320,8 +320,10 @@ function StepConfigurePrefix({ usePrefix, setUsePrefix, prefix, setPrefix, defau
 
       {/* Policy mode */}
       <div>
-        <p className="text-sm font-medium text-gray-700 mb-1">Conditional Access policy state</p>
-        <p className="text-xs text-gray-500 mb-3">Applies to all CA policies. Override individual policies in the Configure step.</p>
+        <p className="text-sm font-medium text-gray-700 mb-1">Policy creation mode</p>
+        <p className="text-xs text-gray-500 mb-3">
+          Active deploys everything. Report-Only creates CA policies in monitor mode and skips all others — useful for auditing impact before full enforcement.
+        </p>
         <div className="grid grid-cols-2 gap-3">
           {POLICY_MODE_OPTIONS.map((m) => (
             <button
@@ -578,10 +580,9 @@ function StepReview({ authMode, org, credentials, prefix, usePrefix, selectedIds
 
   const customised = Object.keys(policyConfigs || {}).filter(id => selectedIds.includes(id)).length
 
-  const modeLabel = policyMode === 'enabledForReportingButNotEnforced' ? 'Report-Only' : 'Active'
-  const modeVariant = policyMode === 'enabledForReportingButNotEnforced' ? 'warning' : 'success'
-
+  const isReportOnly = policyMode === 'enabledForReportingButNotEnforced'
   const caCount = selectedPolicies.filter(p => p.category === 'Conditional Access').length
+  const nonCaCount = selectedPolicies.length - caCount
 
   return (
     <div className="space-y-5">
@@ -617,17 +618,16 @@ function StepReview({ authMode, org, credentials, prefix, usePrefix, selectedIds
 
       <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800 space-y-1">
         <p>
-          <strong>{selectedIds.length} policies</strong> will be created across {Object.keys(byCategory).length} categories.
+          <strong>{selectedIds.length} policies</strong> selected across {Object.keys(byCategory).length} categories.
           {customised > 0 && <span className="ml-2 text-navy font-medium">{customised} with custom configuration.</span>}
         </p>
-        {caCount > 0 && (
-          <p className="flex items-center gap-2">
-            {caCount} Conditional Access {caCount === 1 ? 'policy' : 'policies'} will be created as{' '}
-            <Badge variant={modeVariant}>{modeLabel}</Badge>
-            {policyMode === 'enabledForReportingButNotEnforced' && (
-              <span className="text-amber-700">— users will not be blocked.</span>
-            )}
-          </p>
+        {isReportOnly ? (
+          <ul className="mt-1 space-y-0.5 text-amber-700 list-disc list-inside">
+            {caCount > 0 && <li>{caCount} Conditional Access {caCount === 1 ? 'policy' : 'policies'} will be created in <strong>Report-Only</strong> mode — users will not be blocked.</li>}
+            {nonCaCount > 0 && <li>{nonCaCount} other {nonCaCount === 1 ? 'policy' : 'policies'} will be <strong>skipped</strong> — no report-only equivalent exists for these types.</li>}
+          </ul>
+        ) : (
+          <p className="mt-0.5 text-amber-700">All {selectedIds.length} {selectedIds.length === 1 ? 'policy' : 'policies'} will be created and enforced immediately.</p>
         )}
       </div>
 
@@ -638,15 +638,24 @@ function StepReview({ authMode, org, credentials, prefix, usePrefix, selectedIds
             <div className="space-y-1">
               {policies.map((p) => {
                 const cfg = policyConfigs?.[p.id] || {}
-                const effectiveState = cfg.state || (p.category === 'Conditional Access' ? policyMode : 'enabled')
-                const stateLabel = { enabled: 'Active', disabled: 'Off', enabledForReportingButNotEnforced: 'Report-Only' }[effectiveState] || effectiveState
-                const stateVariant = { enabled: 'success', disabled: 'neutral', enabledForReportingButNotEnforced: 'warning' }[effectiveState] || 'neutral'
-                const showState = p.category === 'Conditional Access'
+                const isCA = p.category === 'Conditional Access'
+                let badgeLabel, badgeVariant
+                if (isCA) {
+                  const stateVal = cfg.state || policyMode
+                  badgeLabel = { enabled: 'Active', disabled: 'Off', enabledForReportingButNotEnforced: 'Report-Only' }[stateVal] || stateVal
+                  badgeVariant = { enabled: 'success', disabled: 'neutral', enabledForReportingButNotEnforced: 'warning' }[stateVal] || 'neutral'
+                } else if (isReportOnly) {
+                  badgeLabel = 'Skipped'
+                  badgeVariant = 'neutral'
+                } else {
+                  badgeLabel = 'Active'
+                  badgeVariant = 'success'
+                }
                 return (
                   <div key={p.id} className="flex items-center gap-3 py-1.5 px-3 rounded-md hover:bg-gray-50">
                     <span className="text-xs font-mono text-gray-400 w-12 flex-shrink-0">{p.id}</span>
                     <span className="text-sm text-gray-800 flex-1">{p.name}</span>
-                    {showState && <Badge variant={stateVariant}>{stateLabel}</Badge>}
+                    <Badge variant={badgeVariant}>{badgeLabel}</Badge>
                     {severityBadge(p.severity)}
                   </div>
                 )
@@ -783,11 +792,17 @@ export default function CreatePolicies() {
     setDeployResults({})
     const selectedPolicies = POLICIES.filter((p) => selectedIds.includes(p.id))
 
-    // Apply policyMode as the default state for CA policies without an explicit state override
+    // Apply policyMode globally:
+    // CA policies → set state (enabled / enabledForReportingButNotEnforced)
+    // Non-CA policies in report-only mode → mark as skipped (no report-only equivalent)
     const effectiveConfigs = { ...policyConfigs }
     selectedPolicies.forEach((p) => {
-      if (p.category === 'Conditional Access' && !effectiveConfigs[p.id]?.state) {
-        effectiveConfigs[p.id] = { ...(effectiveConfigs[p.id] || {}), state: policyMode }
+      if (p.category === 'Conditional Access') {
+        if (!effectiveConfigs[p.id]?.state) {
+          effectiveConfigs[p.id] = { ...(effectiveConfigs[p.id] || {}), state: policyMode }
+        }
+      } else if (policyMode === 'enabledForReportingButNotEnforced') {
+        effectiveConfigs[p.id] = { ...(effectiveConfigs[p.id] || {}), skip: true }
       }
     })
 

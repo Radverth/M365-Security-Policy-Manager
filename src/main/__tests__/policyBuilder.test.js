@@ -863,6 +863,55 @@ describe('buildPoliciesScript', () => {
   })
 })
 
+// ─── config.skip — global report-only mode for non-CA policies ───────────────
+
+describe('config.skip — skips non-CA policies in report-only mode', () => {
+  const EX = 'Exchange Online'
+  const EN = 'Intune / Endpoint'
+  const SP = 'SharePoint & OneDrive'
+
+  test('EX001 with skip:true emits SKIPPED not SUCCESS', () => {
+    const s = buildPoliciesScript([pol('EX001', EX, 'Enable DKIM')], '', { EX001: { skip: true } })
+    expect(s).toContain('SKIPPED: EX001')
+    expect(s).not.toContain('SUCCESS: EX001')
+    expect(s).not.toContain('Set-DkimSigningConfig')
+  })
+
+  test('EN001 with skip:true emits SKIPPED not SUCCESS', () => {
+    const s = buildPoliciesScript([pol('EN001', EN, 'Require BitLocker')], '', { EN001: { skip: true } })
+    expect(s).toContain('SKIPPED: EN001')
+    expect(s).not.toContain('SUCCESS: EN001')
+    expect(s).not.toContain('New-MgDeviceManagementDeviceCompliancePolicy')
+  })
+
+  test('SP001 with skip:true emits SKIPPED not SUCCESS', () => {
+    const s = buildPoliciesScript([pol('SP001', SP, 'Restrict External Sharing')], '', { SP001: { skip: true } })
+    expect(s).toContain('SKIPPED: SP001')
+    expect(s).not.toContain('SUCCESS: SP001')
+  })
+
+  test('CA001 with skip:true also emits SKIPPED', () => {
+    const s = buildPoliciesScript([pol('CA001', CA, 'Require MFA')], '', { CA001: { skip: true } })
+    expect(s).toContain('SKIPPED: CA001')
+    expect(s).not.toContain('New-MgIdentityConditionalAccessPolicy')
+  })
+
+  test('skip does not affect policies without skip flag', () => {
+    const s = buildPoliciesScript(
+      [pol('EX001', EX, 'Enable DKIM'), pol('CA001', CA, 'Require MFA')],
+      '',
+      { EX001: { skip: true } }
+    )
+    expect(s).toContain('SKIPPED: EX001')
+    expect(s).toContain('New-MgIdentityConditionalAccessPolicy')
+  })
+
+  test('skip reason references Active mode', () => {
+    const s = buildPoliciesScript([pol('EX001', EX, 'Enable DKIM')], '', { EX001: { skip: true } })
+    expect(s).toContain('Active')
+  })
+})
+
 // ─── Special character handling ───────────────────────────────────────────────
 
 describe('special characters in prefix/name', () => {

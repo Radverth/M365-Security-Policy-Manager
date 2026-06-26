@@ -927,6 +927,7 @@ function buildTBScript(policy, config) {
 // ─── Dispatch ─────────────────────────────────────────────────────────────────
 
 function buildPolicyScript(policy, config, prefix) {
+  if (config.skip) return skipBlock(policy.id, policy.name, 'Skipped — set policy mode to Active to deploy')
   switch (policy.category) {
     case 'Conditional Access':    return buildCAScript(policy, config, prefix)
     case 'Identity Protection':   return buildIPScript(policy, config)
