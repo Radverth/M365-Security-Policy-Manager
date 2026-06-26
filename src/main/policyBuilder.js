@@ -65,8 +65,13 @@ function dn(policy, prefix) {
 // ─── Connection detection ─────────────────────────────────────────────────────
 
 const EXO_CATS = new Set(['Exchange Online'])
-const EXO_IDS  = new Set(['DE001','DE002','DE038','AC001','AC004','AC005','EX028'])
-const IPPS_IDS = new Set(['AC007','AC008','AC012','AC013','AC014','AC043','SP007','SP008','SP009','TE009','TE010'])
+// EXO_IDS: policies not in EXO_CATS that still require a Connect-ExchangeOnline session.
+// TB002 uses Set-OrganizationConfig (EXO cmdlet). TE003/004/005/011/017 use Set-CsTeams*
+// cmdlets which are available via the EXO remote PowerShell session.
+const EXO_IDS  = new Set(['DE001','DE002','DE038','AC001','AC004','AC005','TE003','TE004','TE005','TE011','TE017','TB002'])
+// IPPS_IDS: policies that require Connect-IPPSSession (Purview compliance cmdlets).
+// Only include IDs that actually emit IPPS cmdlets — skip IDs that fall to default skipBlock.
+const IPPS_IDS = new Set(['AC007','AC012','AC013','AC014','AC043'])
 
 function needsExo(p)  { return EXO_CATS.has(p.category) || EXO_IDS.has(p.id) }
 function needsIpps(p) { return IPPS_IDS.has(p.id) }
@@ -345,7 +350,7 @@ Write-Output "  CREATED: ID=$($created.Id) State=$($created.State)"`)
     case 'CA025': return policyBlock(policy.id, policy.name,
       `$params = @{
     DisplayName = ${psStr(displayName)}; State = ${psStr(state)}
-    Conditions = @{ Users = ${allUsers()}; Applications = ${allApps}; AuthenticationFlows = @{ TransferMethods = @('deviceCodeFlow') } }
+    Conditions = @{ Users = ${allUsers()}; Applications = ${allApps}; AuthenticationFlows = @{ TransferMethods = 'deviceCodeFlow' } }
     GrantControls = ${grantBlock}
 }
 $created = New-MgIdentityConditionalAccessPolicy -BodyParameter $params
@@ -394,7 +399,7 @@ Write-Output "  CREATED: ID=$($created.Id) State=$($created.State)"`)
 
     case 'CA034': return policyBlock(policy.id, policy.name, caPolicy(
       allUsers(), allApps, grantMfa, '',
-      `@{ ContinuousAccessEvaluation = @{ Mode = 'strictlocation' } }`))
+      `@{ ContinuousAccessEvaluation = @{ Mode = 'strictLocation' } }`))
 
     case 'CA035': return policyBlock(policy.id, policy.name, caPolicy(
       allUsers(), allApps, grantCompliant,
@@ -470,11 +475,11 @@ function buildIPScript(policy, config) {
   switch (policy.id) {
     case 'IP001': return policyBlock(policy.id, policy.name,
       graphPatch('https://graph.microsoft.com/beta/identityProtection/policies/signInRiskPolicy',
-        `@{ state = '${state}'; riskLevel = 'medium' }`))
+        `@{ state = '${state}'; conditions = @{ signInRiskLevels = @('medium', 'high') }; grantControls = @{ operator = 'OR'; builtInControls = @('mfa') } }`))
 
     case 'IP002': return policyBlock(policy.id, policy.name,
       graphPatch('https://graph.microsoft.com/beta/identityProtection/policies/userRiskPolicy',
-        `@{ state = '${state}'; riskLevel = 'medium' }`))
+        `@{ state = '${state}'; conditions = @{ userRiskLevels = @('medium', 'high') }; grantControls = @{ operator = 'OR'; builtInControls = @('passwordChange') } }`))
 
     case 'IP003': return policyBlock(policy.id, policy.name,
       graphPatch('https://graph.microsoft.com/v1.0/policies/authenticationMethodsPolicy/authenticationMethodConfigurations/microsoftAuthenticator',
@@ -515,13 +520,9 @@ if (Get-HostedContentFilterPolicy -Identity $pn -ErrorAction SilentlyContinue) {
     }
 
     case 'EX005': return policyBlock(policy.id, policy.name,
-      `$pn = ${psStr(displayName)}
-$p = @{ RecipientLimitExternalPerHour = 500; RecipientLimitInternalPerHour = 1000; RecipientLimitPerDay = 1000; ActionWhenThresholdReached = 'BlockUserForToday'; AutoForwardingMode = 'Off' }
-if (Get-HostedOutboundSpamFilterPolicy -Identity $pn -ErrorAction SilentlyContinue) {
-    Set-HostedOutboundSpamFilterPolicy -Identity $pn @p
-} else {
-    New-HostedOutboundSpamFilterPolicy -Name $pn @p | Out-Null
-}`)
+      `$p = @{ RecipientLimitExternalPerHour = 500; RecipientLimitInternalPerHour = 1000; RecipientLimitPerDay = 1000; ActionWhenThresholdReached = 'BlockUserForToday'; AutoForwardingMode = 'Off' }
+Set-HostedOutboundSpamFilterPolicy -Identity 'Default' @p | Out-Null
+Write-Output "  Outbound spam limits configured on Default policy"`)
 
     case 'EX006': return policyBlock(policy.id, policy.name,
       `Set-MalwareFilterPolicy -Identity 'Default' -EnableFileFilter ${$e} -Action DeleteMessage -FileTypes @('ace','ani','app','docm','exe','jar','reg','scr','vbe','vbs','cmd','com','cpl','hta','pif','js') | Out-Null`)
@@ -615,11 +616,9 @@ if (-not (Get-TransportRule -Identity $rn -ErrorAction SilentlyContinue)) {
 
     case 'EX036': return policyBlock(policy.id, policy.name,
       `Get-CASMailbox -ResultSize Unlimited | Where-Object { -not $_.SmtpClientAuthenticationDisabled } | ForEach-Object {
-    if (-not $_.ExternalDirectoryObjectId) {
-        Set-CASMailbox -Identity $_.Identity -SmtpClientAuthenticationDisabled $true -ErrorAction SilentlyContinue
-    }
+    Set-CASMailbox -Identity $_.Identity -SmtpClientAuthenticationDisabled $true -ErrorAction SilentlyContinue
 }
-Write-Output "  SMTP AUTH disabled for mailboxes not requiring it"`)
+Write-Output "  SMTP AUTH disabled for all applicable mailboxes"`)
 
     default: return skipBlock(policy.id, policy.name,
       `Configure in Exchange admin centre or Defender portal. ${policy.description}`)
@@ -635,7 +634,9 @@ function buildSPScript(policy, config) {
 Invoke-MgGraphRequest -Method PATCH -Uri 'https://graph.microsoft.com/v1.0/admin/sharepoint/settings' -Body $body -ContentType 'application/json' | Out-Null`
 
   switch (policy.id) {
-    case 'SP001': return policyBlock(policy.id, policy.name, patch(`@{ sharingCapability = 'ExistingExternalUserSharingOnly' }`))
+    // SP001: Disable anonymous "Anyone" links — authenticated external sharing still allowed
+    case 'SP001': return policyBlock(policy.id, policy.name, patch(`@{ sharingCapability = 'ExternalUserSharingOnly' }`))
+    // SP002: Restrict to existing known external users only
     case 'SP002': return policyBlock(policy.id, policy.name, patch(`@{ sharingCapability = 'ExistingExternalUserSharingOnly' }`))
     case 'SP003': return policyBlock(policy.id, policy.name, patch(`@{ defaultSharingLinkType = 'specific' }`))
     case 'SP011': {
@@ -643,7 +644,8 @@ Invoke-MgGraphRequest -Method PATCH -Uri 'https://graph.microsoft.com/v1.0/admin
       return policyBlock(policy.id, policy.name, patch(`@{ guestSharingGroupAllowListInTenantByPrincipalIdentity = @(); isGuestUserSharingLimitedToSelectedDomains = $false; guestExpirationEnabled = $true; guestExpirationInDays = ${days} }`))
     }
     case 'SP016': return policyBlock(policy.id, policy.name, patch(`@{ isOneDriveForGuestsEnabled = $false }`))
-    case 'SP023': return policyBlock(policy.id, policy.name, patch(`@{ isTlsEnabled = $true }`))
+    case 'SP023': return skipBlock(policy.id, policy.name,
+      'Minimum TLS 1.2 for SharePoint is enforced at the Azure AD tenant level and is not configurable via the SharePoint admin Graph API. Microsoft 365 enforces TLS 1.2+ by default for all services.')
     default: return skipBlock(policy.id, policy.name, `Configure in SharePoint admin centre. ${policy.description}`)
   }
 }
@@ -667,8 +669,8 @@ function buildTEScript(policy, config, prefix) {
     case 'TE011': return policyBlock(policy.id, policy.name,
       `Set-CsTeamsAppSetupPolicy -Identity 'Global' -AllowSideLoading $false -ErrorAction SilentlyContinue`)
 
-    case 'TE015': return policyBlock(policy.id, policy.name,
-      `Invoke-MgGraphRequest -Method PATCH -Uri 'https://graph.microsoft.com/beta/teamwork/teamsAppSettings' -Body (@{ isPersonalAccountsEnabled = $false } | ConvertTo-Json) -ContentType 'application/json' -ErrorAction SilentlyContinue | Out-Null`)
+    case 'TE015': return skipBlock(policy.id, policy.name,
+      'Disable via Teams admin centre: External access > Allow communication with Teams users not managed by an organisation, or run: Set-CsExternalAccessPolicy -EnableTeamsConsumerAccess $false in Teams PowerShell.')
 
     case 'TE017': return policyBlock(policy.id, policy.name,
       `Set-CsTeamsMeetingPolicy -Identity 'Global' -MeetingRecordingExpirationDays 60 -ErrorAction SilentlyContinue`)
@@ -705,7 +707,8 @@ Write-Output "  CREATED: ID=$($created.Id) DisplayName=$($created.DisplayName)"`
 
   switch (policy.id) {
     case 'EN001': return policyBlock(policy.id, policy.name, winCompliance('BitLockerEnabled = $true; StorageRequireDeviceEncryption = $true'))
-    case 'EN002': return policyBlock(policy.id, policy.name, winCompliance('DefenderEnabled = $true; RTPEnabled = $true; SignatureOutOfDate = $false'))
+    // SignatureOutOfDate = $true means mark device non-compliant if AV signatures are stale
+    case 'EN002': return policyBlock(policy.id, policy.name, winCompliance('DefenderEnabled = $true; rtpEnabled = $true; SignatureOutOfDate = $true'))
     case 'EN003': return policyBlock(policy.id, policy.name, winCompliance('FirewallEnabled = $true'))
     case 'EN004': return policyBlock(policy.id, policy.name, winCompliance(`OsMinimumVersion = ${psStr(config.minOsVersion || '10.0.19045.0')}`))
     case 'EN005': return policyBlock(policy.id, policy.name, winCompliance('SecureBootEnabled = $true'))
@@ -718,7 +721,12 @@ Write-Output "  CREATED: ID=$($created.Id) DisplayName=$($created.DisplayName)"`
     case 'EN013': return policyBlock(policy.id, policy.name, androidCompliance(`OsMinimumVersion = ${psStr(config.minAndroidVersion || '11.0')}`))
     case 'EN014': return policyBlock(policy.id, policy.name, androidCompliance('StorageRequireEncryption = $true'))
     case 'EN015': return policyBlock(policy.id, policy.name, androidCompliance('SecurityBlockJailbrokenDevices = $true; SecurityBlockDeviceAdministratorManagedDevices = $true'))
-    case 'EN049': return policyBlock(policy.id, policy.name, winCompliance('DefenderSignatureUpdateIntervalInHours = 72'))
+    // Signature update interval is a Device Configuration property, not compliance policy
+    case 'EN049': return policyBlock(policy.id, policy.name,
+      `$params = @{ '@odata.type' = '#microsoft.graph.windows10EndpointProtectionConfiguration'; DisplayName = ${psStr(displayName)}; defenderSignatureUpdateIntervalInHours = 1 }
+$created = New-MgDeviceManagementDeviceConfiguration -BodyParameter $params
+Write-Output "  CREATED: ID=$($created.Id) DisplayName=$($created.DisplayName)"`)
+
     default: return skipBlock(policy.id, policy.name, `Configure in Microsoft Intune admin centre. ${policy.description}`)
   }
 }
@@ -764,7 +772,7 @@ if (Get-RetentionCompliancePolicy -Identity $pn -ErrorAction SilentlyContinue) {
     Write-Output "  Retention policy already exists: $pn"
 } else {
     New-RetentionCompliancePolicy -Name $pn ${location} -Enabled ${$e} | Out-Null
-    New-RetentionComplianceRule -Name "${safe(displayName)} - Rule" -Policy $pn -RetentionDuration ${days} -RetentionDurationDisplayHint 'Days' -ExpirationDateOption 'CreationAgeInDays' | Out-Null
+    New-RetentionComplianceRule -Name "${safe(displayName)} - Rule" -Policy $pn -RetentionDuration ${days} -RetentionComplianceAction 'Keep' | Out-Null
 }`
   }
 
@@ -895,9 +903,23 @@ function buildTBScript(policy, config) {
 
     case 'TB015': {
       const threshold = parseInt(config.lockoutThreshold || '10', 10)
+      // Smart Lockout is configured via the PasswordRuleSettings directory setting template
       return policyBlock(policy.id, policy.name,
-        patch(`'https://graph.microsoft.com/beta/settings/smartLockout'`,
-          `@{ lockoutThreshold = ${threshold}; lockoutDurationInSeconds = 120 }`))
+        `$templateId = '5cf42378-d67d-4f36-ba46-e8b86229381d'
+$settingValues = @(
+    @{ name = 'LockoutThreshold'; value = '${threshold}' }
+    @{ name = 'LockoutDurationInSeconds'; value = '120' }
+)
+$existing = (Invoke-MgGraphRequest -Method GET -Uri 'https://graph.microsoft.com/beta/settings' -OutputType PSObject).value | Where-Object { $_.templateId -eq $templateId } | Select-Object -First 1
+if ($existing) {
+    $body = @{ templateId = $templateId; values = $settingValues } | ConvertTo-Json -Depth 5
+    Invoke-MgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/beta/settings/$($existing.id)" -Body $body -ContentType 'application/json' | Out-Null
+    Write-Output "  Smart Lockout updated: threshold=${threshold}, duration=120s"
+} else {
+    $body = @{ templateId = $templateId; values = $settingValues } | ConvertTo-Json -Depth 5
+    Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/beta/settings' -Body $body -ContentType 'application/json' | Out-Null
+    Write-Output "  Smart Lockout created: threshold=${threshold}, duration=120s"
+}`)
     }
 
     case 'TB016': return policyBlock(policy.id, policy.name,

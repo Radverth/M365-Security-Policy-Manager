@@ -37,8 +37,8 @@ describe('needsExo', () => {
   test('false for Conditional Access', () => {
     expect(needsExo(pol('CA001', CA))).toBe(false)
   })
-  test('false for Tenant Baseline', () => {
-    expect(needsExo(pol('TB002', TB))).toBe(false)
+  test('true for TB002 (uses Set-OrganizationConfig EXO cmdlet)', () => {
+    expect(needsExo(pol('TB002', TB))).toBe(true)
   })
   test('false for SharePoint', () => {
     expect(needsExo(pol('SP001', SP))).toBe(false)
@@ -202,7 +202,7 @@ describe('CA025 - Block Device Code Flow', () => {
   beforeAll(() => { s = script1('CA025', CA, 'Block Device Code Flow') })
 
   test('targets device code flow', () => {
-    expect(s).toContain("TransferMethods = @('deviceCodeFlow')")
+    expect(s).toContain("TransferMethods = 'deviceCodeFlow'")
   })
   test('grant is block', () => {
     expect(s).toContain("BuiltInControls = @('block')")
@@ -295,8 +295,9 @@ describe('IP001 - Sign-In Risk Policy', () => {
     expect(s).toContain('Invoke-MgGraphRequest')
     expect(s).toContain('PATCH')
   })
-  test('sets medium risk level', () => {
-    expect(s).toContain("riskLevel = 'medium'")
+  test('sets medium and high risk levels with MFA grant', () => {
+    expect(s).toContain("signInRiskLevels = @('medium', 'high')")
+    expect(s).toContain("builtInControls = @('mfa')")
   })
 })
 
@@ -449,8 +450,8 @@ describe('SP001 - Restrict External Sharing', () => {
     expect(s).toContain('admin/sharepoint/settings')
     expect(s).toContain('PATCH')
   })
-  test('sets sharing to existing guests only', () => {
-    expect(s).toContain('ExistingExternalUserSharingOnly')
+  test('disables anonymous Anyone links (ExternalUserSharingOnly)', () => {
+    expect(s).toContain('ExternalUserSharingOnly')
   })
 })
 
@@ -493,12 +494,11 @@ describe('TE015 - Disable Personal Teams Accounts', () => {
   let s
   beforeAll(() => { s = script1('TE015', TE, 'Disable Personal Accounts') })
 
-  test('uses Graph API (Invoke-MgGraphRequest)', () => {
-    expect(s).toContain('Invoke-MgGraphRequest')
-    expect(s).toContain('teamsAppSettings')
+  test('emits SKIPPED (requires Teams admin centre)', () => {
+    expect(s).toContain('SKIPPED: TE015')
   })
-  test('disables personal accounts', () => {
-    expect(s).toContain('isPersonalAccountsEnabled = $false')
+  test('includes guidance for Teams admin centre', () => {
+    expect(s).toContain('Teams admin centre')
   })
 })
 
@@ -707,18 +707,24 @@ describe('TB011 - Disable LinkedIn Connection', () => {
 })
 
 describe('TB015 - Smart Lockout', () => {
+  test('uses directory settings template ID for PasswordRuleSettings', () => {
+    const s = script1('TB015', TB, 'Smart Lockout')
+    expect(s).toContain('5cf42378-d67d-4f36-ba46-e8b86229381d')
+    expect(s).toContain('LockoutThreshold')
+    expect(s).toContain('LockoutDurationInSeconds')
+  })
   test('uses default threshold of 10', () => {
     const s = script1('TB015', TB, 'Smart Lockout')
-    expect(s).toContain('lockoutThreshold = 10')
-    expect(s).toContain('lockoutDurationInSeconds = 120')
+    expect(s).toContain("'LockoutThreshold'; value = '10'")
   })
   test('uses custom threshold', () => {
     const s = script1('TB015', TB, 'Smart Lockout', { lockoutThreshold: 5 })
-    expect(s).toContain('lockoutThreshold = 5')
+    expect(s).toContain("'LockoutThreshold'; value = '5'")
   })
-  test('uses beta Graph endpoint', () => {
+  test('uses beta/settings Graph endpoint', () => {
     const s = script1('TB015', TB, 'Smart Lockout')
-    expect(s).toContain('beta/settings/smartLockout')
+    expect(s).toContain('beta/settings')
+    expect(s).toContain('Invoke-MgGraphRequest')
   })
 })
 

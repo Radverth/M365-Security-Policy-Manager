@@ -11,6 +11,8 @@ class PersistentPsSession {
     this.context = null  // { Account, TenantId }
     this._suppressUiOutput = false
     this._win = null
+    this._ready = false        // true once bootstrap completes
+    this._readyPromise = null  // resolves when bootstrap completes
   }
 
   get alive() {
@@ -18,7 +20,16 @@ class PersistentPsSession {
     catch { return false }
   }
 
+  // Waits for bootstrap to finish before running any scripts.
+  // Safe to call when already ready — resolves immediately.
+  _ensureReady() {
+    if (this._ready) return Promise.resolve()
+    if (this._readyPromise) return this._readyPromise
+    return Promise.reject(new Error('Session not started'))
+  }
+
   async start(win) {
+    if (this._readyPromise) return this._readyPromise  // prevent double-start
     this._win = win
     const pwshPath = process.platform === 'win32' ? 'pwsh.exe' : 'pwsh'
     this.proc = spawn(pwshPath, ['-NoProfile', '-NonInteractive', '-Command', '-'], {
@@ -48,17 +59,34 @@ class PersistentPsSession {
 
     this.proc.on('exit', () => {
       this.proc = null; this.context = null; this.lineHandlers = []
+      this._ready = false; this._readyPromise = null
       sendToWin('session:disconnected')
     })
     this.proc.on('error', () => {
       this.proc = null; this.context = null; this.lineHandlers = []
+      this._ready = false; this._readyPromise = null
     })
 
-    // Bootstrap - load modules
-    await this._exec(
-      `$ProgressPreference='SilentlyContinue'\n$VerbosePreference='SilentlyContinue'\nImport-Module Microsoft.Graph.Authentication -ErrorAction SilentlyContinue\nImport-Module Microsoft.Graph.Identity.SignIns -ErrorAction SilentlyContinue\nImport-Module Microsoft.Graph.Users -ErrorAction SilentlyContinue\nImport-Module Microsoft.Graph.Groups -ErrorAction SilentlyContinue\nImport-Module Microsoft.Graph.Identity.DirectoryManagement -ErrorAction SilentlyContinue\nImport-Module Microsoft.Graph.DeviceManagement -ErrorAction SilentlyContinue\n`,
-      null, 45000
-    )
+    // Bootstrap: load all Graph modules in parallel (pwsh 7 ForEach-Object -Parallel).
+    // Sequential imports took 30-60s; parallel loads all six concurrently in ~10s.
+    this._readyPromise = this._exec(
+      `$ProgressPreference='SilentlyContinue'
+$VerbosePreference='SilentlyContinue'
+@(
+  'Microsoft.Graph.Authentication',
+  'Microsoft.Graph.Identity.SignIns',
+  'Microsoft.Graph.Users',
+  'Microsoft.Graph.Groups',
+  'Microsoft.Graph.Identity.DirectoryManagement',
+  'Microsoft.Graph.DeviceManagement'
+) | ForEach-Object -Parallel {
+  Import-Module $_ -ErrorAction SilentlyContinue
+} -ThrottleLimit 6
+`,
+      null, 60000
+    ).then(() => { this._ready = true })
+
+    return this._readyPromise
   }
 
   _exec(script, onLine, timeoutMs = 60000) {
@@ -88,11 +116,14 @@ class PersistentPsSession {
 
   async run(script, onLine, timeoutMs = 60000) {
     if (!this.alive) throw new Error('No active session — connect a tenant first')
+    await this._ensureReady()
     return this._exec(script, onLine, timeoutMs)
   }
 
   async connect(credentials, authMode) {
     if (!this.alive) throw new Error('Session not started')
+    await this._ensureReady()
+
     const loginHint = (authMode !== 'interactive' && credentials?.username)
       ? `-LoginHint '${String(credentials.username).replace(/'/g, "''")}'`
       : ''
@@ -170,6 +201,7 @@ try {
   kill() {
     const p = this.proc
     this.proc = null; this.context = null; this.lineHandlers = []
+    this._ready = false; this._readyPromise = null
     if (p && !p.killed) {
       try { p.stdin.write('exit\n') } catch {}
       setTimeout(() => { try { p.kill() } catch {} }, 800)
