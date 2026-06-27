@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } from 'react'
 import useStore from '../store'
-import { POLICIES, POLICIES_BY_CATEGORY } from '../../shared/constants'
+import { POLICIES, POLICIES_BY_CATEGORY, LICENSE_LABELS, LICENSE_SHORT } from '../../shared/constants'
 import ProgressStep from '../components/ProgressStep'
 import Card from '../components/Card'
 import Button from '../components/Button'
@@ -18,8 +18,9 @@ function severityBadge(sev) {
 }
 
 function resultBadge(status) {
-  if (status === 'success') return <Badge variant="success">Success</Badge>
+  if (status === 'success') return <Badge variant="success">Created</Badge>
   if (status === 'failure') return <Badge variant="error">Failed</Badge>
+  if (status === 'skipped') return <Badge variant="warning">Skipped</Badge>
   return <Badge variant="neutral">Pending</Badge>
 }
 
@@ -250,7 +251,31 @@ function StepInteractive({ org, setOrg, credentials, setCredentials, useDeviceCo
 }
 
 // ── Step 2: Configure Prefix ──────────────────────────────────────────────────
-function StepConfigurePrefix({ usePrefix, setUsePrefix, prefix, setPrefix, defaultPrefix, orgName }) {
+const POLICY_MODE_OPTIONS = [
+  {
+    id: 'enabled',
+    label: 'Active',
+    desc: 'All policies are deployed and enforced immediately.',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'enabledForReportingButNotEnforced',
+    label: 'Report-Only',
+    desc: 'CA policies created in report-only mode. All other policies are skipped.',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+    ),
+  },
+]
+
+function StepConfigurePrefix({ usePrefix, setUsePrefix, prefix, setPrefix, defaultPrefix, orgName, policyMode, setPolicyMode }) {
   const effectiveDefault = orgName || defaultPrefix || ''
   const preview = usePrefix && prefix ? `${prefix} — CA001: Require MFA for All Users` : 'CA001: Require MFA for All Users'
 
@@ -291,6 +316,37 @@ function StepConfigurePrefix({ usePrefix, setUsePrefix, prefix, setPrefix, defau
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
         <p className="text-xs font-medium text-gray-500 mb-1">Policy Name Preview</p>
         <p className="text-sm font-mono text-gray-800">{preview}</p>
+      </div>
+
+      {/* Policy mode */}
+      <div>
+        <p className="text-sm font-medium text-gray-700 mb-1">Policy creation mode</p>
+        <p className="text-xs text-gray-500 mb-3">
+          Active deploys everything. Report-Only creates CA policies in monitor mode and skips all others — useful for auditing impact before full enforcement.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          {POLICY_MODE_OPTIONS.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => setPolicyMode(m.id)}
+              className={[
+                'relative flex flex-col items-start gap-1.5 px-4 py-3 rounded-lg border-2 text-left transition-all',
+                policyMode === m.id
+                  ? 'border-navy bg-navy-50'
+                  : 'border-gray-200 hover:border-gray-300 bg-white',
+              ].join(' ')}
+            >
+              <div className={`flex items-center gap-2 ${policyMode === m.id ? 'text-navy' : 'text-gray-600'}`}>
+                {m.icon}
+                <span className="text-sm font-semibold">{m.label}</span>
+              </div>
+              <span className="text-xs text-gray-500 leading-snug">{m.desc}</span>
+              {policyMode === m.id && (
+                <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-navy" />
+              )}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )
@@ -339,21 +395,41 @@ const SEVERITY_DOT = {
   info: 'bg-gray-400',
 }
 
-function PolicyGridItem({ p, isSelected, onToggle }) {
+const PolicyGridItem = React.memo(function PolicyGridItem({ p, isSelected, toggle, tenantLicenses }) {
+  const missingLics = tenantLicenses && p.requiredLicenses?.length
+    ? p.requiredLicenses.filter(lic => !tenantLicenses[lic])
+    : []
+  const isLocked = missingLics.length > 0
+
+  const badgeLabel = missingLics.length === 1
+    ? (LICENSE_SHORT[missingLics[0]] || missingLics[0])
+    : missingLics.length > 1
+    ? `${missingLics.length} licenses`
+    : null
+
+  const title = isLocked
+    ? `Requires: ${missingLics.map(l => LICENSE_LABELS[l] || l).join(', ')}`
+    : undefined
+
   return (
     <button
-      onClick={onToggle}
+      onClick={() => !isLocked && toggle(p.id)}
+      disabled={isLocked}
+      title={title}
       className={[
         'flex items-center gap-2 px-3 py-2 rounded-lg border text-left transition-colors w-full',
-        isSelected
+        isLocked
+          ? 'opacity-50 cursor-not-allowed bg-gray-50 border-gray-200'
+          : isSelected
           ? 'bg-navy/5 border-navy/25'
           : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50',
       ].join(' ')}
     >
       <div className={`w-4 h-4 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
+        isLocked ? 'border-gray-200 bg-gray-100' :
         isSelected ? 'bg-navy border-navy' : 'border-gray-300'
       }`}>
-        {isSelected && (
+        {isSelected && !isLocked && (
           <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
@@ -361,35 +437,54 @@ function PolicyGridItem({ p, isSelected, onToggle }) {
       </div>
       <span className="text-xs font-mono text-gray-400 w-10 flex-shrink-0">{p.id}</span>
       <span className="text-xs text-gray-800 flex-1 min-w-0 truncate">{p.name}</span>
-      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${SEVERITY_DOT[p.severity] || 'bg-gray-400'}`} title={p.severity} />
+      {isLocked && badgeLabel ? (
+        <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium flex-shrink-0 whitespace-nowrap">
+          {badgeLabel}
+        </span>
+      ) : (
+        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${SEVERITY_DOT[p.severity] || 'bg-gray-400'}`} title={p.severity} />
+      )}
     </button>
   )
-}
+})
 
 function StepSelectPolicies({ selected, setSelected }) {
   const [activeCat, setActiveCat] = useState(null)
   const [search, setSearch] = useState('')
   const selSet = useMemo(() => new Set(selected), [selected])
   const categories = Object.keys(POLICIES_BY_CATEGORY)
+  const tenantLicenses = useStore(s => s.tenantLicenses)
+
+  // Defer the expensive filter/render pass so typing the search box stays instant
+  const deferredSearch = useDeferredValue(search)
 
   const displayPolicies = useMemo(() => {
-    const q = search.toLowerCase().trim()
+    const q = deferredSearch.toLowerCase().trim()
     if (q) return POLICIES.filter(p => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q))
     if (activeCat) return POLICIES_BY_CATEGORY[activeCat] || []
     return POLICIES
-  }, [activeCat, search])
+  }, [activeCat, deferredSearch])
 
-  const groupedView = !search.trim() && !activeCat
+  const groupedView = !deferredSearch.trim() && !activeCat
 
-  function toggle(id) {
-    setSelected(s => selSet.has(id) ? s.filter(x => x !== id) : [...s, id])
-  }
+  // Stable callbacks so React.memo on PolicyGridItem actually skips re-renders
+  const toggle = useCallback((id) => {
+    setSelected(s => {
+      const set = new Set(s)
+      if (set.has(id)) { set.delete(id) } else { set.add(id) }
+      return [...set]
+    })
+  }, [setSelected])
 
-  function toggleCat(cat) {
+  const toggleCat = useCallback((cat) => {
     const ids = (POLICIES_BY_CATEGORY[cat] || []).map(p => p.id)
-    const allSel = ids.every(id => selSet.has(id))
-    setSelected(s => allSel ? s.filter(id => !ids.includes(id)) : [...new Set([...s, ...ids])])
-  }
+    setSelected(s => {
+      const set = new Set(s)
+      const allSel = ids.every(id => set.has(id))
+      if (allSel) { ids.forEach(id => set.delete(id)) } else { ids.forEach(id => set.add(id)) }
+      return [...set]
+    })
+  }, [setSelected])
 
   return (
     <div className="flex flex-col gap-3">
@@ -475,7 +570,7 @@ function StepSelectPolicies({ selected, setSelected }) {
                   </div>
                   <div className="grid grid-cols-2 gap-1.5">
                     {catPolicies.map(p => (
-                      <PolicyGridItem key={p.id} p={p} isSelected={selSet.has(p.id)} onToggle={() => toggle(p.id)} />
+                      <PolicyGridItem key={p.id} p={p} isSelected={selSet.has(p.id)} toggle={toggle} tenantLicenses={tenantLicenses} />
                     ))}
                   </div>
                 </div>
@@ -484,7 +579,7 @@ function StepSelectPolicies({ selected, setSelected }) {
           ) : (
             <div className="grid grid-cols-2 gap-1.5">
               {displayPolicies.map(p => (
-                <PolicyGridItem key={p.id} p={p} isSelected={selSet.has(p.id)} onToggle={() => toggle(p.id)} />
+                <PolicyGridItem key={p.id} p={p} isSelected={selSet.has(p.id)} toggle={toggle} tenantLicenses={tenantLicenses} />
               ))}
             </div>
           )}
@@ -512,7 +607,7 @@ function StepSelectPolicies({ selected, setSelected }) {
 // (inline in wizard body below)
 
 // ── Step 5: Review ────────────────────────────────────────────────────────────
-function StepReview({ authMode, org, credentials, prefix, usePrefix, selectedIds, policyConfigs }) {
+function StepReview({ authMode, org, credentials, prefix, usePrefix, selectedIds, policyConfigs, policyMode }) {
   const selectedPolicies = POLICIES.filter((p) => selectedIds.includes(p.id))
   const byCategory = selectedPolicies.reduce((acc, p) => {
     if (!acc[p.category]) acc[p.category] = []
@@ -523,6 +618,10 @@ function StepReview({ authMode, org, credentials, prefix, usePrefix, selectedIds
   const authLabel = { itglue: 'IT Glue → WAM', interactive: 'WAM / Browser' }[authMode]
 
   const customised = Object.keys(policyConfigs || {}).filter(id => selectedIds.includes(id)).length
+
+  const isReportOnly = policyMode === 'enabledForReportingButNotEnforced'
+  const caCount = selectedPolicies.filter(p => p.category === 'Conditional Access').length
+  const nonCaCount = selectedPolicies.length - caCount
 
   return (
     <div className="space-y-5">
@@ -556,9 +655,19 @@ function StepReview({ authMode, org, credentials, prefix, usePrefix, selectedIds
         </div>
       )}
 
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
-        <strong>{selectedIds.length} policies</strong> will be created across {Object.keys(byCategory).length} categories.
-        {customised > 0 && <span className="ml-2 text-navy font-medium">{customised} with custom configuration.</span>}
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800 space-y-1">
+        <p>
+          <strong>{selectedIds.length} policies</strong> selected across {Object.keys(byCategory).length} categories.
+          {customised > 0 && <span className="ml-2 text-navy font-medium">{customised} with custom configuration.</span>}
+        </p>
+        {isReportOnly ? (
+          <ul className="mt-1 space-y-0.5 text-amber-700 list-disc list-inside">
+            {caCount > 0 && <li>{caCount} Conditional Access {caCount === 1 ? 'policy' : 'policies'} will be created in <strong>Report-Only</strong> mode — users will not be blocked.</li>}
+            {nonCaCount > 0 && <li>{nonCaCount} other {nonCaCount === 1 ? 'policy' : 'policies'} will be <strong>skipped</strong> — no report-only equivalent exists for these types.</li>}
+          </ul>
+        ) : (
+          <p className="mt-0.5 text-amber-700">All {selectedIds.length} {selectedIds.length === 1 ? 'policy' : 'policies'} will be created and enforced immediately.</p>
+        )}
       </div>
 
       <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
@@ -568,14 +677,24 @@ function StepReview({ authMode, org, credentials, prefix, usePrefix, selectedIds
             <div className="space-y-1">
               {policies.map((p) => {
                 const cfg = policyConfigs?.[p.id] || {}
-                const stateVal = cfg.state || 'enabled'
-                const stateLabel = { enabled: 'On', disabled: 'Off', enabledForReportingButNotEnforced: 'Report' }[stateVal] || stateVal
-                const stateVariant = { enabled: 'success', disabled: 'neutral', enabledForReportingButNotEnforced: 'warning' }[stateVal] || 'neutral'
+                const isCA = p.category === 'Conditional Access'
+                let badgeLabel, badgeVariant
+                if (isCA) {
+                  const stateVal = cfg.state || policyMode
+                  badgeLabel = { enabled: 'Active', disabled: 'Off', enabledForReportingButNotEnforced: 'Report-Only' }[stateVal] || stateVal
+                  badgeVariant = { enabled: 'success', disabled: 'neutral', enabledForReportingButNotEnforced: 'warning' }[stateVal] || 'neutral'
+                } else if (isReportOnly) {
+                  badgeLabel = 'Skipped'
+                  badgeVariant = 'neutral'
+                } else {
+                  badgeLabel = 'Active'
+                  badgeVariant = 'success'
+                }
                 return (
                   <div key={p.id} className="flex items-center gap-3 py-1.5 px-3 rounded-md hover:bg-gray-50">
                     <span className="text-xs font-mono text-gray-400 w-12 flex-shrink-0">{p.id}</span>
                     <span className="text-sm text-gray-800 flex-1">{p.name}</span>
-                    <Badge variant={stateVariant}>{stateLabel}</Badge>
+                    <Badge variant={badgeVariant}>{badgeLabel}</Badge>
                     {severityBadge(p.severity)}
                   </div>
                 )
@@ -649,6 +768,7 @@ export default function CreatePolicies() {
   const [credentials, setCredentials] = useState(null)
   const [usePrefix, setUsePrefix] = useState(!!settings.defaultPolicyPrefix)
   const [prefix, setPrefix] = useState(settings.defaultPolicyPrefix || '')
+  const [policyMode, setPolicyMode] = useState('enabled')
   const [selectedIds, setSelectedIds] = useState(baselinePolicyIds ?? [])
   const [policyConfigs, setPolicyConfigs] = useState({})
   const [deployLogs, setDeployLogs] = useState([])
@@ -710,18 +830,40 @@ export default function CreatePolicies() {
     setDeployLogs([])
     setDeployResults({})
     const selectedPolicies = POLICIES.filter((p) => selectedIds.includes(p.id))
+
+    // Apply policyMode globally:
+    // CA policies → set state (enabled / enabledForReportingButNotEnforced)
+    // Non-CA policies in report-only mode → mark as skipped (no report-only equivalent)
+    const effectiveConfigs = { ...policyConfigs }
+    selectedPolicies.forEach((p) => {
+      if (p.category === 'Conditional Access') {
+        if (!effectiveConfigs[p.id]?.state) {
+          effectiveConfigs[p.id] = { ...(effectiveConfigs[p.id] || {}), state: policyMode }
+        }
+      } else if (policyMode === 'enabledForReportingButNotEnforced') {
+        effectiveConfigs[p.id] = { ...(effectiveConfigs[p.id] || {}), skip: true }
+      }
+    })
+
     try {
       const result = await window.api.policies.create({
         policies: selectedPolicies,
         credentials: usingSession ? { interactive: true } : credentials,
         prefix: usePrefix ? prefix : '',
         authMode: usingSession ? 'interactive' : authMode,
-        policyConfigs,
+        policyConfigs: effectiveConfigs,
         useDeviceCode: usingSession ? true : useDeviceCode,
       })
       setDeployResults(result.results || {})
-      const successCount = Object.values(result.results || {}).filter((v) => v === 'success').length
-      addNotification(`Deployment complete: ${successCount}/${selectedIds.length} policies created`, 'success')
+      const r = result.results || {}
+      const successCount = Object.values(r).filter((v) => v === 'success').length
+      const failureCount = Object.values(r).filter((v) => v === 'failure').length
+      const skippedCount = Object.values(r).filter((v) => v === 'skipped').length
+      const parts = [`${successCount} created`]
+      if (failureCount > 0) parts.push(`${failureCount} failed`)
+      if (skippedCount > 0) parts.push(`${skippedCount} skipped`)
+      const notifVariant = failureCount > 0 ? 'error' : (successCount > 0 ? 'success' : 'warning')
+      addNotification(`Deployment complete: ${parts.join(', ')}`, notifVariant)
     } catch (err) {
       addNotification('Deployment failed: ' + err.message, 'error')
     } finally {
@@ -732,6 +874,7 @@ export default function CreatePolicies() {
   const reset = () => {
     setStep(1)
     if (!usingSession) { setOrg(null); setCredentials(null) }
+    setPolicyMode('enabled')
     setPolicyConfigs({})
     setDeployLogs([]); setDeployResults({})
   }
@@ -800,6 +943,7 @@ export default function CreatePolicies() {
               prefix={prefix} setPrefix={setPrefix}
               defaultPrefix={settings.defaultPolicyPrefix}
               orgName={org?.name}
+              policyMode={policyMode} setPolicyMode={setPolicyMode}
             />
           )}
           {contentStep === 3 && <StepSelectPolicies selected={selectedIds} setSelected={setSelectedIds} />}
@@ -818,6 +962,7 @@ export default function CreatePolicies() {
               prefix={prefix} usePrefix={usePrefix}
               selectedIds={selectedIds}
               policyConfigs={policyConfigs}
+              policyMode={policyMode}
             />
           )}
           {contentStep === 6 && (

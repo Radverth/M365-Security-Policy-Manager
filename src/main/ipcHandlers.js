@@ -85,7 +85,7 @@ function recSection(recommendations, esc, date) {
 </div>`
 }
 
-function generateReportHtml(orgName, policies, date, nameMap = {}, recommendations = []) {
+function generateReportHtml(orgName, policies, date, nameMap = {}, recommendations = [], licenses = null) {
   function esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
   function pick(...keys) { return obj => { for (const k of keys) { if (obj?.[k] != null) return obj[k] } return null } }
   const pv = (obj, ...keys) => { for (const k of keys) { if (obj?.[k] != null) return obj[k] } return null }
@@ -460,6 +460,8 @@ p { margin: 0; }
 
 ${recommendations.length > 0 ? recSection(recommendations, esc, date) : ''}
 
+${licenses ? licenseSection(licenses, esc, date) : ''}
+
 </body>
 </html>`
 }
@@ -798,7 +800,7 @@ can assist with the design, testing (Report Only mode), and phased enforcement o
 </html>`
 }
 
-async function generateDocxBuffer(orgName, policies, date, nameMap = {}, recommendations = [], amName = null, amEmail = null) {
+async function generateDocxBuffer(orgName, policies, date, nameMap = {}, recommendations = [], amName = null, amEmail = null, licenses = null) {
   const {
     Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
     Header, Footer, AlignmentType, HeadingLevel, BorderStyle, WidthType,
@@ -1211,12 +1213,91 @@ async function generateDocxBuffer(orgName, policies, date, nameMap = {}, recomme
     spacer(320)
   ]
 
+  const licenseDocxSection = licenses ? (() => {
+    const ALL_LICENSES = ['p1', 'p2', 'intune', 'defender', 'purview', 'exchange', 'sharepoint', 'teams']
+    const present = ALL_LICENSES.filter(k => licenses[k])
+    const missing  = ALL_LICENSES.filter(k => !licenses[k])
+
+    const licRows = ALL_LICENSES.map((key, i) => {
+      const has = !!licenses[key]
+      return new TableRow({
+        children: [
+          new TableCell({
+            width: { size: 2800, type: WidthType.DXA },
+            borders: allBorders(),
+            shading: i % 2 === 1 ? { fill: 'F7F9FC', type: ShadingType.CLEAR } : undefined,
+            children: [new Paragraph({ spacing: { before: 60, after: 60 }, children: [new TextRun({ text: LICENSE_LABELS_MAIN[key] || key, font: 'Arial', size: 18, bold: true, color: '374151' })] })]
+          }),
+          new TableCell({
+            width: { size: 1200, type: WidthType.DXA },
+            borders: allBorders(),
+            shading: i % 2 === 1 ? { fill: 'F7F9FC', type: ShadingType.CLEAR } : undefined,
+            children: [new Paragraph({ spacing: { before: 60, after: 60 }, children: [new TextRun({ text: has ? 'Detected' : 'Not found', font: 'Arial', size: 18, bold: true, color: has ? '16803D' : 'DC2626' })] })]
+          }),
+          new TableCell({
+            width: { size: 5840, type: WidthType.DXA },
+            borders: allBorders(),
+            shading: i % 2 === 1 ? { fill: 'F7F9FC', type: ShadingType.CLEAR } : undefined,
+            children: [new Paragraph({ spacing: { before: 60, after: 60 }, children: [new TextRun({ text: LICENSE_PLANS_MAIN[key] || '', font: 'Arial', size: 16, color: '6B7280' })] })]
+          }),
+        ]
+      })
+    })
+
+    const upgradeItems = []
+    if (!licenses.p1 && !licenses.p2) upgradeItems.push('Essential Identity: Upgrade to Business Premium or E3 — unlocks Conditional Access, Smart Lockout, Passwordless (39+ policies)')
+    else if (!licenses.p2) upgradeItems.push('Advanced Identity: Add Entra ID P2 or upgrade to E5 — unlocks risk-based sign-in and Identity Protection policies (4 policies)')
+    if (!licenses.intune) upgradeItems.push('Device Management: Upgrade to Business Premium, E3, or E5 — unlocks device compliance policies for Windows, macOS, iOS, Android (15 policies)')
+    if (!licenses.defender) upgradeItems.push('Email Security: Add Defender for Office 365 P1 or upgrade to Business Premium/E5 — unlocks Safe Attachments, Safe Links, Anti-Phishing (4 policies)')
+    if (!licenses.purview) upgradeItems.push('Compliance: Add E5 Compliance or upgrade to E5 — unlocks DLP and retention policies (5 policies)')
+
+    return [
+      new Paragraph({ pageBreakBefore: true }),
+      ...sectionHeading('License Assessment'),
+      new Paragraph({
+        spacing: { before: 0, after: 160 },
+        children: [
+          new TextRun({ text: `${present.length} of ${ALL_LICENSES.length} recommended licence tiers detected on this tenant. `, font: 'Arial', size: 22, color: '374151' }),
+          ...(missing.length > 0 ? [new TextRun({ text: `${missing.length} licence tier(s) not found.`, font: 'Arial', size: 22, color: 'DC2626' })] : [new TextRun({ text: 'All recommended licences present.', font: 'Arial', size: 22, color: '16803D', bold: true })])
+        ]
+      }),
+      new Paragraph({ spacing: { before: 0, after: 200 }, children: [new TextRun({ text: 'Licence detection is performed at the tenant (organisation) level via subscribedSkus — individual user assignments may vary.', font: 'Arial', size: 18, italics: true, color: '9CA3AF' })] }),
+      new Table({
+        width: { size: 9840, type: WidthType.DXA },
+        columnWidths: [2800, 1200, 5840],
+        rows: [
+          tableHeaderRow(['License', 'Status', 'Subscription Plans'], [2800, 1200, 5840]),
+          ...licRows
+        ]
+      }),
+      spacer(240),
+      ...(upgradeItems.length > 0 ? [
+        ...subHeading('Upgrade Recommendations'),
+        new Paragraph({ spacing: { before: 0, after: 120 }, children: [new TextRun({ text: 'The following upgrades would unlock additional security policies for this tenant:', font: 'Arial', size: 22, color: '374151' })] }),
+        ...upgradeItems.map(item => new Paragraph({
+          spacing: { before: 60, after: 60 },
+          indent: { left: 360 },
+          children: [
+            new TextRun({ text: '●  ', font: 'Arial', size: 20, color: 'E8A020', bold: true }),
+            new TextRun({ text: item, font: 'Arial', size: 20, color: '374151' })
+          ]
+        })),
+        spacer(160)
+      ] : [
+        ...subHeading('Upgrade Recommendations'),
+        new Paragraph({ spacing: { before: 0, after: 120 }, children: [new TextRun({ text: 'All recommended licence tiers are present — no further licence upgrades required.', font: 'Arial', size: 22, color: '16803D', bold: true })] }),
+        spacer(160)
+      ])
+    ]
+  })() : []
+
   const children = [
     ...coverPage,
     ...execSummary,
     ...baselineSection,
     ...gapAnalysisSection,
     ...actionPlanSection,
+    ...licenseDocxSection,
     ...inventorySection
   ]
 
@@ -1247,6 +1328,161 @@ async function generateDocxBuffer(orgName, policies, date, nameMap = {}, recomme
   })
 
   return Packer.toBuffer(doc)
+}
+
+// ─── License detection ────────────────────────────────────────────────────────
+
+const LICENSE_LABELS_MAIN = {
+  p1:        'Azure AD Premium P1',
+  p2:        'Azure AD Premium P2',
+  intune:    'Microsoft Intune',
+  defender:  'Microsoft Defender for Office 365',
+  purview:   'Microsoft Purview (E5 Compliance)',
+  exchange:  'Exchange Online',
+  sharepoint:'SharePoint Online',
+  teams:     'Microsoft Teams',
+}
+
+const LICENSE_PLANS_MAIN = {
+  p1:        'Included in: Microsoft 365 E3, E5, Business Premium; Entra ID P1 add-on',
+  p2:        'Included in: Microsoft 365 E5, EMS E5; Entra ID P2 add-on',
+  intune:    'Included in: Microsoft 365 E3, E5, Business Premium; Intune Plan 1 standalone',
+  defender:  'Included in: Microsoft 365 E5, Business Premium; Defender for Office 365 P1 add-on',
+  purview:   'Included in: Microsoft 365 E5; Microsoft 365 E5 Compliance add-on',
+  exchange:  'Included in: Microsoft 365 E1, E3, E5, Business Essentials/Standard/Premium',
+  sharepoint:'Included in: Microsoft 365 E1, E3, E5, Business plans',
+  teams:     'Included in: Microsoft 365 E1, E3, E5, Business plans',
+}
+
+async function checkTenantLicenses() {
+  try {
+    const lines = []
+    const script = `
+try {
+  $response = Invoke-MgGraphRequest -Uri 'https://graph.microsoft.com/v1.0/subscribedSkus' -Method GET -OutputType PSObject
+  $plans = @{}
+  foreach ($sku in $response.value) {
+    foreach ($plan in $sku.servicePlans) {
+      if ($plan.provisioningStatus -in @('Success','PendingActivation','PendingProvisioning')) {
+        $plans[$plan.servicePlanName] = $true
+      }
+    }
+  }
+  $result = [ordered]@{
+    p1        = [bool]($plans['AAD_PREMIUM'])
+    p2        = [bool]($plans['AAD_PREMIUM_P2'])
+    intune    = [bool]($plans['INTUNE_A'] -or $plans['INTUNE_EDU'] -or $plans['INTUNE_SMB'])
+    defender  = [bool]($plans['ATP_ENTERPRISE'] -or $plans['MDEFP1'] -or $plans['ATP_ENTERPRISE_FACULTY'])
+    purview   = [bool]($plans['INFORMATION_PROTECTION_COMPLIANCE'] -or $plans['AIP_PREMIUM_P2'] -or $plans['PURVIEW_DISCOVERY'])
+    exchange  = [bool]($plans['EXCHANGE_S_STANDARD'] -or $plans['EXCHANGE_S_ENTERPRISE'] -or $plans['EXCHANGE_S_DESKLESS'] -or $plans['EXCHANGE_S_FOUNDATION'])
+    sharepoint= [bool]($plans['SHAREPOINTSTANDARD'] -or $plans['SHAREPOINTENTERPRISE'] -or $plans['SHAREPOINTDESKLESS'])
+    teams     = [bool]($plans['TEAMS1'] -or $plans['TEAMS_FREE'])
+  }
+  Write-Output 'LICENSE_JSON_START'
+  $result | ConvertTo-Json -Compress
+  Write-Output 'LICENSE_JSON_END'
+} catch {
+  Write-Output "LICENSE_CHECK_FAILED: $($_.Exception.Message)"
+}`
+    await psSession.run(script, (line) => lines.push(line))
+    const startIdx = lines.indexOf('LICENSE_JSON_START')
+    const endIdx   = lines.indexOf('LICENSE_JSON_END')
+    if (startIdx !== -1 && endIdx > startIdx) {
+      const json = lines.slice(startIdx + 1, endIdx).join('')
+      return JSON.parse(json)
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+// ─── License section for PDF report ──────────────────────────────────────────
+
+function licenseSection(licenses, esc, date) {
+  const ALL_LICENSES = ['p1', 'p2', 'intune', 'defender', 'purview', 'exchange', 'sharepoint', 'teams']
+
+  const present = ALL_LICENSES.filter(k => licenses[k])
+  const missing = ALL_LICENSES.filter(k => !licenses[k])
+
+  const licRow = (key, has) => `
+    <tr>
+      <td style="padding:7px 10px;font-size:11px;font-weight:600;color:#374151;border-bottom:1px solid #f3f4f6;width:220px">${esc(LICENSE_LABELS_MAIN[key])}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #f3f4f6;width:90px">
+        <span style="-webkit-print-color-adjust:exact;print-color-adjust:exact;display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;background:${has ? '#dcfce7' : '#fef2f2'};color:${has ? '#15803d' : '#dc2626'}">
+          ${has ? 'Detected' : 'Not found'}
+        </span>
+      </td>
+      <td style="padding:7px 10px;font-size:10px;color:#9ca3af;border-bottom:1px solid #f3f4f6">${esc(LICENSE_PLANS_MAIN[key])}</td>
+    </tr>`
+
+  const upgradeRows = []
+  if (!licenses.p1 && !licenses.p2) {
+    upgradeRows.push({ tier: 'Essential', plan: 'Microsoft 365 Business Premium or E3', unlocks: 'Conditional Access, Smart Lockout, Passwordless — 39+ identity & access policies' })
+  } else if (!licenses.p2) {
+    upgradeRows.push({ tier: 'Advanced Identity', plan: 'Microsoft 365 E5 or Entra ID P2 add-on', unlocks: 'Risk-based sign-in policies, Identity Protection — 4 additional policies' })
+  }
+  if (!licenses.intune) {
+    upgradeRows.push({ tier: 'Device Management', plan: 'Microsoft 365 Business Premium, E3, or E5', unlocks: 'Device compliance policies for Windows, macOS, iOS, Android — 15 policies' })
+  }
+  if (!licenses.defender) {
+    upgradeRows.push({ tier: 'Email Security', plan: 'Microsoft 365 Business Premium, E5, or Defender for O365 P1 add-on', unlocks: 'Safe Attachments, Safe Links, Anti-Phishing, ZAP — 4 policies' })
+  }
+  if (!licenses.purview) {
+    upgradeRows.push({ tier: 'Compliance', plan: 'Microsoft 365 E5 or E5 Compliance add-on', unlocks: 'DLP policies, retention policies for Teams/SharePoint/Exchange — 5 policies' })
+  }
+
+  const upgradeHtml = upgradeRows.length === 0
+    ? `<div style="display:flex;align-items:center;gap:6px;color:#16a34a;font-size:11px;font-weight:600;margin-top:12px">
+         <span style="font-size:14px">✓</span> All recommended license tiers are present on this tenant
+       </div>`
+    : upgradeRows.map(r => `
+      <div style="margin-top:10px;padding:10px 14px;border-left:3px solid #f59e0b;background:#fffbeb;border-radius:0 6px 6px 0">
+        <div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:3px">${esc(r.tier)} Upgrade</div>
+        <div style="font-size:11px;color:#374151"><strong>Plan:</strong> ${esc(r.plan)}</div>
+        <div style="font-size:11px;color:#374151;margin-top:2px"><strong>Unlocks:</strong> ${esc(r.unlocks)}</div>
+      </div>`).join('')
+
+  return `<div class="break">
+  <div style="margin-bottom:20px;display:flex;align-items:baseline;justify-content:space-between">
+    <div>
+      <div style="font-size:16px;font-weight:700;color:#1a2d4a">License Assessment</div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:3px">Microsoft 365 subscription licences detected on this tenant &mdash; ${esc(date)}</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <span style="-webkit-print-color-adjust:exact;print-color-adjust:exact;padding:3px 10px;border-radius:4px;font-size:10px;font-weight:700;background:#dcfce7;color:#15803d">${present.length} detected</span>
+      ${missing.length > 0 ? `<span style="-webkit-print-color-adjust:exact;print-color-adjust:exact;padding:3px 10px;border-radius:4px;font-size:10px;font-weight:700;background:#fef2f2;color:#dc2626">${missing.length} not found</span>` : ''}
+    </div>
+  </div>
+
+  <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:20px">
+    <table style="width:100%;border-collapse:collapse">
+      <thead>
+        <tr style="-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#f3f4f6">
+          <th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;border-bottom:2px solid #e5e7eb">License</th>
+          <th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;border-bottom:2px solid #e5e7eb">Status</th>
+          <th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;border-bottom:2px solid #e5e7eb">Subscription</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${ALL_LICENSES.map(k => licRow(k, licenses[k])).join('')}
+      </tbody>
+    </table>
+  </div>
+
+  <div style="margin-bottom:16px">
+    <div style="font-size:13px;font-weight:700;color:#1a2d4a;margin-bottom:8px">Upgrade Recommendations</div>
+    <p style="font-size:11px;color:#6b7280;line-height:1.6;margin-bottom:4px">
+      The following subscription upgrades would unlock additional security policies for this tenant.
+      Licence checks are performed at the tenant (organisation) level against <code>subscribedSkus</code> — individual user assignments may vary.
+    </p>
+    ${upgradeHtml}
+  </div>
+
+  <div style="margin-top:18px;padding:10px 14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px">
+    <p style="font-size:10px;color:#9ca3af">Generated by M365 Security Policy Manager &middot; Affinity IT &middot; ${esc(date)} &middot; Confidential</p>
+  </div>
+</div>`
 }
 
 let _win = null
@@ -1413,10 +1649,16 @@ function registerIpcHandlers(win) {
     try {
       if (!psSession.alive) await psSession.start(_win)
       const context = await psSession.connect(credentials, authMode)
-      return { context }
+      const licenses = await checkTenantLicenses()
+      return { context, licenses }
     } catch (err) {
       return { error: err.message }
     }
+  })
+
+  ipcMain.handle('session:getLicenses', async () => {
+    if (!psSession.alive) return null
+    return checkTenantLicenses()
   })
 
   ipcMain.handle('session:disconnect', async () => {
@@ -1471,7 +1713,13 @@ function registerIpcHandlers(win) {
         if (id) results[id] = 'success'
       } else if (line.startsWith('FAILURE:')) {
         const id = line.match(/[A-Z]{2}\d{3}/)?.[0]
-        if (id) results[id] = 'failure'
+        if (id) {
+          results[id] = 'failure'
+          logger.warn(`Policy ${id} FAILED: ${line}`)
+        }
+      } else if (line.startsWith('SKIPPED:')) {
+        const id = line.match(/[A-Z]{2}\d{3}/)?.[0]
+        if (id) results[id] = 'skipped'
       }
     }
 
@@ -1482,11 +1730,23 @@ function registerIpcHandlers(win) {
     // needed, run the policy blocks directly through the session — no re-auth required.
     // psSession's global stdout handler already streams every line to ps:output, so
     // parseResult must NOT re-send or each line would appear twice in the terminal.
+    const logSummary = () => {
+      const s = Object.values(results).filter(v => v === 'success').length
+      const f = Object.values(results).filter(v => v === 'failure').length
+      const k = Object.values(results).filter(v => v === 'skipped').length
+      logger.info(`policies:create complete — success=${s} failure=${f} skipped=${k} total=${policies.length}`)
+      if (f > 0) {
+        const failed = Object.entries(results).filter(([, v]) => v === 'failure').map(([id]) => id).join(', ')
+        logger.warn(`policies:create failed IDs: ${failed}`)
+      }
+    }
+
     if (psSession.alive && !hasExo && !hasIpps) {
       logger.info('IPC: policies:create — using persistent session (no re-auth)')
       _win.webContents.send('ps:output', 'CONNECTED: Using active tenant session — deploying policies...')
       const script = buildPoliciesScript(policies, prefix || '', policyConfigs || {})
       await psSession.run(script, parseResult, 300000)
+      logSummary()
       return { logs, results }
     }
 
@@ -1500,6 +1760,7 @@ function registerIpcHandlers(win) {
       (line) => _win.webContents.send('ps:error', line)
     )
 
+    logSummary()
     return { logs, results }
   })
 
@@ -1774,6 +2035,10 @@ if (-not ($scopes -contains 'Policy.ReadWrite.ConditionalAccess')) {
   Write-Output "POLICY_JSON_START"
   $policies | ConvertTo-Json -Depth 10 -Compress
   Write-Output "POLICY_JSON_END"
+  try {
+    $org = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization?\`$select=displayName" -ErrorAction SilentlyContinue
+    if ($org -and $org.value -and $org.value.Count -gt 0) { Write-Output "TENANT_NAME:$($org.value[0].displayName)" }
+  } catch {}
   Write-Output "DONE: $count"
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
@@ -1799,21 +2064,10 @@ if (-not ($scopes -contains 'Policy.ReadWrite.ConditionalAccess')) {
       const parsed = JSON.parse(json)
       const policies = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : [])
 
-      // Fetch tenant display name
+      // Extract tenant name from the combined response
       let tenantName = null
-      try {
-        const orgLines = []
-        await psSession.run(
-          `try {
-  $org = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization?\`$select=displayName" -ErrorAction SilentlyContinue
-  if ($org -and $org.value -and $org.value.Count -gt 0) { Write-Output "TENANT_NAME:$($org.value[0].displayName)" }
-} catch {}`,
-          (line) => orgLines.push(line),
-          15000
-        )
-        const nameLine = orgLines.find(l => l.startsWith('TENANT_NAME:'))
-        if (nameLine) tenantName = nameLine.slice('TENANT_NAME:'.length).trim()
-      } catch { /* best-effort */ }
+      const nameLine = lines.find(l => l.startsWith('TENANT_NAME:'))
+      if (nameLine) tenantName = nameLine.slice('TENANT_NAME:'.length).trim()
 
       // Resolve display names for all excluded users, groups, and roles
       const SPECIAL_IDS = new Set(['All', 'None', 'GuestsOrExternalUsers', 'AllTrusted'])
@@ -1874,7 +2128,7 @@ Write-Output "NAME_MAP_END"`,
   })
 
   // App: save PDF
-  ipcMain.handle('app:savePDF', async (_, orgName, policiesData, nameMap = {}, recommendations = []) => {
+  ipcMain.handle('app:savePDF', async (_, orgName, policiesData, nameMap = {}, recommendations = [], licenses = null) => {
     const sanitised = (orgName || 'report')
       .replace(/[^a-zA-Z0-9\s\-_]/g, '')
       .replace(/\s+/g, '_')
@@ -1891,7 +2145,7 @@ Write-Output "NAME_MAP_END"`,
 
     const policies = Array.isArray(policiesData) ? policiesData : []
     const date = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })
-    const html = generateReportHtml(orgName, policies, date, nameMap || {}, recommendations || [])
+    const html = generateReportHtml(orgName, policies, date, nameMap || {}, recommendations || [], licenses || null)
     const tmpPath = path.join(app.getPath('temp'), `_affinity_report_${Date.now()}.html`)
     const printWin = new BrowserWindow({
       show: false,
@@ -1918,7 +2172,7 @@ Write-Output "NAME_MAP_END"`,
   })
 
   // App: save Word doc
-  ipcMain.handle('app:saveDocx', async (_, orgName, policiesData, nameMap = {}, recommendations = [], accountManager = null) => {
+  ipcMain.handle('app:saveDocx', async (_, orgName, policiesData, nameMap = {}, recommendations = [], accountManager = null, licenses = null) => {
     const sanitised = (orgName || 'report')
       .replace(/[^a-zA-Z0-9\s\-_]/g, '')
       .replace(/\s+/g, '_')
@@ -1938,7 +2192,7 @@ Write-Output "NAME_MAP_END"`,
     const amName  = accountManager?.name  || null
     const amEmail = accountManager?.email || null
     try {
-      const buffer = await generateDocxBuffer(orgName, policies, date, nameMap || {}, recommendations || [], amName, amEmail)
+      const buffer = await generateDocxBuffer(orgName, policies, date, nameMap || {}, recommendations || [], amName, amEmail, licenses || null)
       fs.writeFileSync(filePath, buffer)
       return { path: filePath }
     } catch (err) {

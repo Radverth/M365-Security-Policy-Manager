@@ -47,6 +47,10 @@ function createWindow() {
   registerIpcHandlers(win)
   setupAutoUpdater(win, isDev)
 
+  // Pre-warm: start the PowerShell session and load Graph modules in the background
+  // so the ~10s module loading is complete by the time the user clicks Connect.
+  psSession.start(win).catch(err => logger.warn('psSession pre-warm failed:', err.message))
+
   // Intercept window close while a session is active — the window is still
   // alive here so IPC reaches the renderer, the overlay shows, then we destroy.
   win.on('close', (e) => {

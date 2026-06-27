@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo, useCallback, useDeferredValue } from 'react'
 import { POLICIES, CATEGORY_FIELDS, POLICY_EXTRA_FIELDS } from '../../shared/constants'
 import EntityPicker from '../components/EntityPicker'
 import useStore from '../store'
@@ -79,9 +79,13 @@ function FieldInput({ field, value, onChange }) {
 }
 
 // One policy row (collapsed by default, expand to edit fields)
-function PolicyRow({ policy, config, onChange }) {
+const PolicyRow = React.memo(function PolicyRow({ policy, config, setPolicyConfigs }) {
   const [open, setOpen] = useState(false)
-  const fields = getFields(policy)
+  const fields = useMemo(() => getFields(policy), [policy])
+  const onChange = useCallback(
+    (newConfig) => setPolicyConfigs(prev => ({ ...prev, [policy.id]: newConfig })),
+    [policy.id, setPolicyConfigs]
+  )
   const state = config.state || fields.find(f => f.key === 'state')?.default || 'enabled'
 
   const stateColour = {
@@ -153,52 +157,59 @@ function PolicyRow({ policy, config, onChange }) {
       )}
     </div>
   )
-}
+})
 
 export default function ConfigurePolicies({ selectedIds, policyConfigs, setPolicyConfigs }) {
   const [search, setSearch] = useState('')
   const [expandedCategory, setExpandedCategory] = useState(null)
 
-  const selectedPolicies = POLICIES.filter(p => selectedIds.includes(p.id))
+  // Defer search filtering so typing stays snappy even with many policy rows
+  const deferredSearch = useDeferredValue(search)
 
-  // Group by category
-  const byCategory = selectedPolicies.reduce((acc, p) => {
-    if (!acc[p.category]) acc[p.category] = []
-    acc[p.category].push(p)
-    return acc
-  }, {})
-
-  const filteredCategories = Object.fromEntries(
-    Object.entries(byCategory).map(([cat, policies]) => [
-      cat,
-      policies.filter(p =>
-        !search ||
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.id.toLowerCase().includes(search.toLowerCase())
-      )
-    ]).filter(([, ps]) => ps.length > 0)
+  const selectedPolicies = useMemo(
+    () => POLICIES.filter(p => selectedIds.includes(p.id)),
+    [selectedIds]
   )
 
-  function getConfig(policy) {
-    if (policyConfigs[policy.id]) return policyConfigs[policy.id]
-    return getDefaults(policy)
-  }
+  const byCategory = useMemo(
+    () => selectedPolicies.reduce((acc, p) => {
+      if (!acc[p.category]) acc[p.category] = []
+      acc[p.category].push(p)
+      return acc
+    }, {}),
+    [selectedPolicies]
+  )
 
-  function setConfig(policyId, config) {
-    setPolicyConfigs(prev => ({ ...prev, [policyId]: config }))
-  }
+  const filteredCategories = useMemo(
+    () => Object.fromEntries(
+      Object.entries(byCategory).map(([cat, policies]) => [
+        cat,
+        policies.filter(p =>
+          !deferredSearch ||
+          p.name.toLowerCase().includes(deferredSearch.toLowerCase()) ||
+          p.id.toLowerCase().includes(deferredSearch.toLowerCase())
+        )
+      ]).filter(([, ps]) => ps.length > 0)
+    ),
+    [byCategory, deferredSearch]
+  )
 
-  function resetAll() {
-    setPolicyConfigs({})
-  }
+  const getConfig = useCallback(
+    (policy) => policyConfigs[policy.id] || getDefaults(policy),
+    [policyConfigs]
+  )
 
-  // Count policies with non-default config
-  const customisedCount = selectedPolicies.filter(p => {
-    const cfg = policyConfigs[p.id]
-    if (!cfg) return false
-    const fields = getFields(p)
-    return fields.some(f => cfg[f.key] !== undefined && !isDefaultValue(f, cfg[f.key]))
-  }).length
+  const resetAll = useCallback(() => setPolicyConfigs({}), [setPolicyConfigs])
+
+  const customisedCount = useMemo(
+    () => selectedPolicies.filter(p => {
+      const cfg = policyConfigs[p.id]
+      if (!cfg) return false
+      const fields = getFields(p)
+      return fields.some(f => cfg[f.key] !== undefined && !isDefaultValue(f, cfg[f.key]))
+    }).length,
+    [selectedPolicies, policyConfigs]
+  )
 
   return (
     <div className="space-y-4">
@@ -267,7 +278,7 @@ export default function ConfigurePolicies({ selectedIds, policyConfigs, setPolic
                       key={p.id}
                       policy={p}
                       config={getConfig(p)}
-                      onChange={cfg => setConfig(p.id, cfg)}
+                      setPolicyConfigs={setPolicyConfigs}
                     />
                   ))}
                 </div>
