@@ -1531,16 +1531,26 @@ function registerIpcHandlers(win) {
   if (_handlersRegistered) return
   _handlersRegistered = true
 
-  // Store — itGlueApiKey is routed through safeStorage helpers
+  // Store — only known settings keys are readable/writable from the renderer
+  const STORE_ALLOWED_KEYS = new Set([
+    'itGlueApiKey', 'itGlueBaseUrl', 'defaultPolicyPrefix',
+    'powershellPath', 'executionPolicy', 'theme', 'firstRun',
+  ])
+
   ipcMain.handle('store:get', (_, key) => {
+    if (!STORE_ALLOWED_KEYS.has(key)) { logger.warn(`store:get blocked unknown key: ${key}`); return undefined }
     if (key === 'itGlueApiKey') return getApiKey()
     return store.get(key)
   })
   ipcMain.handle('store:set', (_, key, value) => {
+    if (!STORE_ALLOWED_KEYS.has(key)) { logger.warn(`store:set blocked unknown key: ${key}`); return }
     if (key === 'itGlueApiKey') { setApiKey(value); return }
     store.set(key, value)
   })
-  ipcMain.handle('store:delete', (_, key) => store.delete(key))
+  ipcMain.handle('store:delete', (_, key) => {
+    if (!STORE_ALLOWED_KEYS.has(key)) { logger.warn(`store:delete blocked unknown key: ${key}`); return }
+    store.delete(key)
+  })
 
   // App
   ipcMain.handle('app:getVersion', () => app.getVersion())

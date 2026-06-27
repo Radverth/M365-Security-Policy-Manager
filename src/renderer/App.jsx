@@ -14,6 +14,7 @@ import Modules from './pages/Modules'
 import Settings from './pages/Settings'
 import Baselines from './pages/Baselines'
 import UpdaterModal from './components/UpdaterModal'
+import ErrorBoundary from './components/ErrorBoundary'
 
 const VERSION = '1.1.0'
 
@@ -731,13 +732,13 @@ export default function App() {
         <Sidebar modules={modules} psStatus={psStatus} />
         <main className="flex-1 overflow-y-auto">
           <Routes>
-            <Route path="/" element={<PageWrapper><Dashboard /></PageWrapper>} />
-            <Route path="/create" element={<PageWrapper><CreatePolicies /></PageWrapper>} />
-            <Route path="/report" element={<PageWrapper><SecurityReport /></PageWrapper>} />
-            <Route path="/manage" element={<PageWrapper><ManagePolicies /></PageWrapper>} />
-            <Route path="/baselines" element={<PageWrapper><Baselines /></PageWrapper>} />
-            <Route path="/modules" element={<PageWrapper><Modules /></PageWrapper>} />
-            <Route path="/settings" element={<PageWrapper><Settings /></PageWrapper>} />
+            <Route path="/" element={<PageWrapper><ErrorBoundary label="Dashboard"><Dashboard /></ErrorBoundary></PageWrapper>} />
+            <Route path="/create" element={<PageWrapper><ErrorBoundary label="Create Policies"><CreatePolicies /></ErrorBoundary></PageWrapper>} />
+            <Route path="/report" element={<PageWrapper><ErrorBoundary label="Security Report"><SecurityReport /></ErrorBoundary></PageWrapper>} />
+            <Route path="/manage" element={<PageWrapper><ErrorBoundary label="Manage Policies"><ManagePolicies /></ErrorBoundary></PageWrapper>} />
+            <Route path="/baselines" element={<PageWrapper><ErrorBoundary label="Baselines"><Baselines /></ErrorBoundary></PageWrapper>} />
+            <Route path="/modules" element={<PageWrapper><ErrorBoundary label="Modules"><Modules /></ErrorBoundary></PageWrapper>} />
+            <Route path="/settings" element={<PageWrapper><ErrorBoundary label="Settings"><Settings /></ErrorBoundary></PageWrapper>} />
           </Routes>
         </main>
       </div>
