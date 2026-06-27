@@ -3,7 +3,7 @@ const { checkPowerShell, runScript } = require('./powershell')
 const { getModuleStatus, installModules, updateModules, unknownModuleStatus } = require('./moduleManager')
 const itGlue = require('./itGlue')
 const { buildScript, buildConnectGraph, buildPoliciesScript, needsExo, needsIpps } = require('./policyBuilder')
-const store = require('./store')
+const { store, getApiKey, setApiKey } = require('./store')
 const logger = require('./logger')
 const path = require('path')
 const { execFile } = require('child_process')
@@ -1531,9 +1531,15 @@ function registerIpcHandlers(win) {
   if (_handlersRegistered) return
   _handlersRegistered = true
 
-  // Store
-  ipcMain.handle('store:get', (_, key) => store.get(key))
-  ipcMain.handle('store:set', (_, key, value) => store.set(key, value))
+  // Store — itGlueApiKey is routed through safeStorage helpers
+  ipcMain.handle('store:get', (_, key) => {
+    if (key === 'itGlueApiKey') return getApiKey()
+    return store.get(key)
+  })
+  ipcMain.handle('store:set', (_, key, value) => {
+    if (key === 'itGlueApiKey') { setApiKey(value); return }
+    store.set(key, value)
+  })
   ipcMain.handle('store:delete', (_, key) => store.delete(key))
 
   // App
