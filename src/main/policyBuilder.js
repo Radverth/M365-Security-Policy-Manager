@@ -62,6 +62,70 @@ function dn(policy, prefix) {
   return prefix ? `${prefix} - ${base}` : base
 }
 
+// Returns a single PowerShell if-statement that writes a WARNING line when the
+// guard expression is false (i.e. the required license is absent).
+function licWarn(guardExpr, policyId, msg) {
+  return `if (-not (${guardExpr})) { Write-Output "  WARNING: ${policyId} — ${msg}" }`
+}
+
+// One-time license detection block prepended to every deployment script.
+// Fetches tenant-level subscribedSkus (NOT the signed-in admin's personal
+// licenses — admin accounts often have no personal license).
+// All variables default to $true so warnings are suppressed if the SKU fetch
+// fails (e.g. no Graph connection, permissions issue, etc.).
+function buildLicenseCheckScript() {
+  return `
+# ── Tenant license detection ─────────────────────────────────────────────────
+$_licP1 = $true; $_licP2 = $true; $_licIntune = $true
+$_licDefO365 = $true; $_licPurview = $true
+$_licExchange = $true; $_licSharePoint = $true; $_licTeams = $true
+try {
+  # Collect every service plan name from active tenant subscriptions.
+  # capabilityStatus = 'Enabled' filters out suspended or warning-state SKUs.
+  $_licSps = @((Invoke-MgGraphRequest -Method GET -Uri 'https://graph.microsoft.com/v1.0/subscribedSkus' -OutputType PSObject).value |
+    Where-Object { $_.capabilityStatus -eq 'Enabled' } |
+    ForEach-Object { $_.servicePlans } |
+    Where-Object { $_.provisioningStatus -ne 'Disabled' } |
+    Select-Object -ExpandProperty servicePlanName -Unique)
+
+  # AAD P1 — Conditional Access, Smart Lockout, auth policies
+  # Service plan AAD_PREMIUM is present in: AAD P1, E3, E5, Business Premium, EMS E3/E5
+  $_licP1 = ($_licSps -contains 'AAD_PREMIUM') -or ($_licSps -contains 'AAD_PREMIUM_P2')
+
+  # AAD P2 — Identity Protection risk policies, PIM
+  # Service plan AAD_PREMIUM_P2 is present in: AAD P2, E5, EMS E5
+  $_licP2 = $_licSps -contains 'AAD_PREMIUM_P2'
+
+  # Microsoft Intune — device compliance and MDM enrollment
+  # Service plan INTUNE_A is present in: Intune, E3, E5, Business Standard/Premium, EMS E3/E5
+  $_licIntune = $_licSps -contains 'INTUNE_A'
+
+  # Defender for Office 365 Plan 1 — Safe Attachments, Safe Links, Anti-Phish
+  # Service plan ATP_ENTERPRISE is present in: Defender for O365 P1/P2, Business Premium, E5
+  $_licDefO365 = $_licSps -contains 'ATP_ENTERPRISE'
+
+  # Microsoft Purview — DLP and retention compliance policies
+  # Service plan INFORMATION_PROTECTION_COMPLIANCE in: E5 Compliance, M365 E5
+  $_licPurview = $_licSps -contains 'INFORMATION_PROTECTION_COMPLIANCE'
+
+  # Exchange Online — mailbox, transport, spam/malware policies
+  # EXCHANGE_S_STANDARD = Plan 1 (Business Basic); EXCHANGE_S_ENTERPRISE = Plan 2 (E3+)
+  $_licExchange = ($_licSps -contains 'EXCHANGE_S_STANDARD') -or ($_licSps -contains 'EXCHANGE_S_ENTERPRISE')
+
+  # SharePoint Online — sharing, external access, OneDrive settings
+  $_licSharePoint = ($_licSps -contains 'SHAREPOINTSTANDARD') -or ($_licSps -contains 'SHAREPOINTENTERPRISE')
+
+  # Microsoft Teams
+  $_licTeams = $_licSps -contains 'TEAMS1'
+
+  Write-Output "INFO: Tenant licenses — P1=$_licP1 P2=$_licP2 Intune=$_licIntune DefenderO365=$_licDefO365 Purview=$_licPurview Exchange=$_licExchange SharePoint=$_licSharePoint Teams=$_licTeams"
+} catch {
+  Write-Output "INFO: License check skipped — $($_.Exception.Message)"
+}
+# ─────────────────────────────────────────────────────────────────────────────
+`
+}
+
 // ─── Connection detection ─────────────────────────────────────────────────────
 
 const EXO_CATS = new Set(['Exchange Online'])
@@ -218,6 +282,17 @@ function buildCAScript(policy, config, prefix) {
     hasExcU ? `; ExcludeUsers = ${excUsrs}` : '',
   ].join('')
 
+  // Policies that require AAD P2 (risk-based sign-in/user risk conditions)
+  const CA_P2 = new Set(['CA007', 'CA008', 'CA009', 'CA017', 'CA023', 'CA037'])
+  // Policies that require Intune in addition to P1 (device compliance / app protection)
+  const CA_INTUNE = new Set(['CA004', 'CA010', 'CA011', 'CA012', 'CA024', 'CA027', 'CA035', 'CA046'])
+
+  const lw = CA_P2.has(policy.id)
+    ? licWarn('$_licP2', policy.id, 'Azure AD Premium P2 required — risk-based sign-in/user-risk conditions require Entra ID P2 (included in E5, EMS E5)')
+    : CA_INTUNE.has(policy.id)
+    ? licWarn('$_licP1 -and $_licIntune', policy.id, 'Azure AD Premium P1 and Microsoft Intune required — device compliance and app protection conditions need both (included in Business Premium, E3+)')
+    : licWarn('$_licP1', policy.id, 'Azure AD Premium P1 required — Conditional Access policies need Entra ID P1 (included in E3, E5, Business Premium)')
+
   // Shorthand condition builders
   const allUsers = () => `@{ IncludeUsers = @('All')${excClause} }`
   const adminRoles = () => `@{ IncludeRoles = @(${ADMIN_ROLES_PS})${excClause} }`
@@ -252,7 +327,9 @@ $created = New-MgIdentityConditionalAccessPolicy -BodyParameter $params
 Write-Output "  CREATED: ID=$($created.Id) State=$($created.State)"`
   }
 
-  switch (policy.id) {
+  // Wrap switch in IIFE so we can post-process the result once to inject lw,
+  // rather than modifying every individual case branch.
+  const _raw = (() => { switch (policy.id) {
     case 'CA001': return policyBlock(policy.id, policy.name, caPolicy(
       `@{ IncludeUsers = @('All'); ExcludeRoles = @('62e90394-69f5-4237-9190-012177145e10')${excClause} }`,
       allApps, grantMfa))
@@ -460,7 +537,12 @@ Write-Output "  CREATED: ID=$($created.Id) State=$($created.State)"`)
       'Emergency access exclusion: add break-glass account Object IDs to the Exclude Groups field on all other CA policies.')
 
     default: return skipBlock(policy.id, policy.name, 'Configure in Azure portal > Conditional Access.')
-  }
+  } })()
+  // Inject license warning at the top of each policyBlock's try-body.
+  // skipBlock output contains no 'try {\n' so those pass through unchanged.
+  return _raw.includes('\ntry {\n')
+    ? _raw.replace('\ntry {\n', `\ntry {\n    ${lw}\n`)
+    : _raw
 }
 
 // ─── Identity Protection ──────────────────────────────────────────────────────
@@ -474,7 +556,7 @@ function buildIPScript(policy, config) {
   // confirm the persisted state after the write and warn if it didn't take effect.
   const graphPatchVerified = (uri, body, verifyNote) => {
     const riskLevelsExpr = verifyNote
-    return `Write-Output "  INFO: Requires Azure AD Premium P2 licensing to enforce"
+    return `${licWarn('$_licP2', policy.id, 'Azure AD Premium P2 required — Identity Protection risk policies require Entra ID P2 (included in E5, EMS E5)')}
 $_body = ${body} | ConvertTo-Json -Depth 10
 Invoke-MgGraphRequest -Method PATCH -Uri '${uri}' -Body $_body -ContentType 'application/json' | Out-Null
 $_r = Invoke-MgGraphRequest -Method GET -Uri '${uri}' -OutputType PSObject
@@ -501,6 +583,7 @@ if ($_r.state -ne '${state}') { Write-Output "  WARNING: state was not applied �
       ))
 
     case 'IP003': return policyBlock(policy.id, policy.name,
+      licWarn('$_licP1', policy.id, 'Azure AD Premium P1 required — authentication method policies need Entra ID P1 (included in E3, E5, Business Premium)') + '\n' +
       graphPatch('https://graph.microsoft.com/v1.0/policies/authenticationMethodsPolicy/authenticationMethodConfigurations/microsoftAuthenticator',
         `@{ state = '${state}' }`))
 
@@ -516,7 +599,12 @@ function buildEXScript(policy, config, prefix) {
   const enabled = (config.state || 'enabled') === 'enabled'
   const $e = enabled ? '$true' : '$false'
 
-  switch (policy.id) {
+  const DEFENDER_EX = new Set(['EX008', 'EX009', 'EX010', 'EX035'])
+  const lw = DEFENDER_EX.has(policy.id)
+    ? licWarn('$_licDefO365', policy.id, 'Microsoft Defender for Office 365 Plan 1 required — Safe Attachments, Safe Links and anti-phishing need Defender for O365 P1 (included in Business Premium, E5)')
+    : licWarn('$_licExchange', policy.id, 'Exchange Online license required — mailbox and transport policies require an Exchange Online subscription (included in E1/E3/E5, Business plans)')
+
+  const _raw = (() => { switch (policy.id) {
     case 'EX001': return policyBlock(policy.id, policy.name,
       `Get-AcceptedDomain | Where-Object { $_.DomainType -eq 'Authoritative' } | ForEach-Object {
     try { Set-DkimSigningConfig -Identity $_.DomainName -Enabled ${$e} -ErrorAction Stop }
@@ -641,7 +729,10 @@ Write-Output "  SMTP AUTH disabled for all applicable mailboxes"`)
 
     default: return skipBlock(policy.id, policy.name,
       `Configure in Exchange admin centre or Defender portal. ${policy.description}`)
-  }
+  } })()
+  return _raw.includes('\ntry {\n')
+    ? _raw.replace('\ntry {\n', `\ntry {\n    ${lw}\n`)
+    : _raw
 }
 
 // ─── SharePoint & OneDrive ────────────────────────────────────────────────────
@@ -652,7 +743,9 @@ function buildSPScript(policy, config) {
     `$body = ${body} | ConvertTo-Json -Depth 5
 Invoke-MgGraphRequest -Method PATCH -Uri 'https://graph.microsoft.com/v1.0/admin/sharepoint/settings' -Body $body -ContentType 'application/json' | Out-Null`
 
-  switch (policy.id) {
+  const lw = licWarn('$_licSharePoint', policy.id, 'SharePoint Online license required — sharing and external access settings require SharePoint Online (included in E1/E3/E5, Business plans)')
+
+  const _raw = (() => { switch (policy.id) {
     // SP001: Disable anonymous "Anyone" links — authenticated external sharing still allowed
     case 'SP001': return policyBlock(policy.id, policy.name, patch(`@{ sharingCapability = 'ExternalUserSharingOnly' }`))
     // SP002: Restrict to existing known external users only
@@ -666,7 +759,10 @@ Invoke-MgGraphRequest -Method PATCH -Uri 'https://graph.microsoft.com/v1.0/admin
     case 'SP023': return skipBlock(policy.id, policy.name,
       'Minimum TLS 1.2 for SharePoint is enforced at the Azure AD tenant level and is not configurable via the SharePoint admin Graph API. Microsoft 365 enforces TLS 1.2+ by default for all services.')
     default: return skipBlock(policy.id, policy.name, `Configure in SharePoint admin centre. ${policy.description}`)
-  }
+  } })()
+  return _raw.includes('\ntry {\n')
+    ? _raw.replace('\ntry {\n', `\ntry {\n    ${lw}\n`)
+    : _raw
 }
 
 // ─── Teams ────────────────────────────────────────────────────────────────────
@@ -675,7 +771,9 @@ function buildTEScript(policy, config, prefix) {
   const displayName = dn(policy, prefix)
   const enabled = (config.state || 'enabled') === 'enabled'
 
-  switch (policy.id) {
+  const lw = licWarn('$_licTeams', policy.id, 'Microsoft Teams license required — Teams policy cmdlets require a Teams subscription (included in E1/E3/E5, Business plans)')
+
+  const _raw = (() => { switch (policy.id) {
     case 'TE003': return policyBlock(policy.id, policy.name,
       `Set-CsTeamsMeetingPolicy -Identity 'Global' -AllowAnonymousUsersToJoinMeeting $false -AllowAnonymousUsersToStartMeeting $false -ErrorAction SilentlyContinue`)
 
@@ -695,7 +793,10 @@ function buildTEScript(policy, config, prefix) {
       `Set-CsTeamsMeetingPolicy -Identity 'Global' -MeetingRecordingExpirationDays 60 -ErrorAction SilentlyContinue`)
 
     default: return skipBlock(policy.id, policy.name, `Configure in Teams admin centre. ${policy.description}`)
-  }
+  } })()
+  return _raw.includes('\ntry {\n')
+    ? _raw.replace('\ntry {\n', `\ntry {\n    ${lw}\n`)
+    : _raw
 }
 
 // ─── Intune / Endpoint ────────────────────────────────────────────────────────
@@ -724,7 +825,9 @@ $created = New-MgDeviceManagementDeviceCompliancePolicy -BodyParameter $params
 Write-Output "  CREATED: ID=$($created.Id) DisplayName=$($created.DisplayName)"`
   }
 
-  switch (policy.id) {
+  const lw = licWarn('$_licIntune', policy.id, 'Microsoft Intune license required — device compliance policies require Intune (included in E3/E5, Business Premium, EMS E3/E5)')
+
+  const _raw = (() => { switch (policy.id) {
     case 'EN001': return policyBlock(policy.id, policy.name, winCompliance('BitLockerEnabled = $true; StorageRequireDeviceEncryption = $true'))
     // SignatureOutOfDate = $true means mark device non-compliant if AV signatures are stale
     case 'EN002': return policyBlock(policy.id, policy.name, winCompliance('DefenderEnabled = $true; rtpEnabled = $true; SignatureOutOfDate = $true'))
@@ -747,7 +850,10 @@ $created = New-MgDeviceManagementDeviceConfiguration -BodyParameter $params
 Write-Output "  CREATED: ID=$($created.Id) DisplayName=$($created.DisplayName)"`)
 
     default: return skipBlock(policy.id, policy.name, `Configure in Microsoft Intune admin centre. ${policy.description}`)
-  }
+  } })()
+  return _raw.includes('\ntry {\n')
+    ? _raw.replace('\ntry {\n', `\ntry {\n    ${lw}\n`)
+    : _raw
 }
 
 // ─── Defender ─────────────────────────────────────────────────────────────────
@@ -757,7 +863,9 @@ function buildDEScript(policy, config, prefix) {
   const enabled = (config.state || 'enabled') === 'enabled'
   const notifEmail = config.notificationEmail || ''
 
-  switch (policy.id) {
+  const lw = licWarn('$_licDefO365', policy.id, 'Microsoft Defender for Office 365 Plan 1 required — Defender for O365 policies need the ATP_ENTERPRISE service plan (included in Business Premium, E5)')
+
+  const _raw = (() => { switch (policy.id) {
     case 'DE001': return policyBlock(policy.id, policy.name,
       `Set-AtpPolicyForO365 -EnableATPForSPOTeamsODB $true -EnableSafeDocs $true -AllowSafeDocsOpen $false | Out-Null`)
 
@@ -773,7 +881,10 @@ function buildDEScript(policy, config, prefix) {
 
     default: return skipBlock(policy.id, policy.name,
       `Configure in Microsoft Defender portal (security.microsoft.com). ${policy.description}`)
-  }
+  } })()
+  return _raw.includes('\ntry {\n')
+    ? _raw.replace('\ntry {\n', `\ntry {\n    ${lw}\n`)
+    : _raw
 }
 
 // ─── Audit & Compliance ───────────────────────────────────────────────────────
@@ -783,6 +894,11 @@ function buildACScript(policy, config, prefix) {
   const enabled = (config.state || 'enabled') === 'enabled'
   const $e = enabled ? '$true' : '$false'
   const notifEmail = config.notificationEmail || ''
+
+  const PURVIEW_AC = new Set(['AC007', 'AC012', 'AC013', 'AC014', 'AC043'])
+  const lw = PURVIEW_AC.has(policy.id)
+    ? licWarn('$_licPurview', policy.id, 'Microsoft Purview (E5 Compliance) license required — DLP and retention compliance policies need the INFORMATION_PROTECTION_COMPLIANCE service plan (included in E5 Compliance, M365 E5)')
+    : licWarn('$_licExchange', policy.id, 'Exchange Online license required — audit log configuration requires an Exchange Online subscription (included in E1/E3/E5, Business plans)')
 
   function retentionPolicy(location, years) {
     const days = (parseInt(years, 10) || 7) * 365
@@ -795,7 +911,7 @@ if (Get-RetentionCompliancePolicy -Identity $pn -ErrorAction SilentlyContinue) {
 }`
   }
 
-  switch (policy.id) {
+  const _raw = (() => { switch (policy.id) {
     case 'AC001': return policyBlock(policy.id, policy.name,
       `Set-AdminAuditLogConfig -UnifiedAuditLogIngestionEnabled ${$e} -ErrorAction SilentlyContinue | Out-Null
 Write-Output "  Unified audit log enabled: ${enabled}"`)
@@ -841,7 +957,10 @@ if (Get-DlpCompliancePolicy -Identity $pn -ErrorAction SilentlyContinue) {
 
     default: return skipBlock(policy.id, policy.name,
       `Configure in Microsoft Purview compliance portal. ${policy.description}`)
-  }
+  } })()
+  return _raw.includes('\ntry {\n')
+    ? _raw.replace('\ntry {\n', `\ntry {\n    ${lw}\n`)
+    : _raw
 }
 
 // ─── Admin Security ───────────────────────────────────────────────────────────
@@ -868,6 +987,7 @@ if ($gaRole) {
     }
 
     case 'AS018': return policyBlock(policy.id, policy.name,
+      licWarn('$_licP1', policy.id, 'Azure AD Premium P1 required — OAuth app consent policy configuration needs Entra ID P1 (included in E3, E5, Business Premium)') + '\n' +
       `$body = @{ permissionGrantPolicyIdsAssignedToDefaultUserRole = @('ManagePermissionGrantsForSelf.microsoft-user-default-low') } | ConvertTo-Json
 Invoke-MgGraphRequest -Method PATCH -Uri 'https://graph.microsoft.com/v1.0/policies/authorizationPolicy' -Body $body -ContentType 'application/json' | Out-Null
 Write-Output "  User consent restricted to verified low-risk apps"`)
@@ -894,7 +1014,12 @@ function buildTBScript(policy, config) {
   const patch = (uri, body) =>
     `Invoke-MgGraphRequest -Method PATCH -Uri '${uri}' -Body (${body} | ConvertTo-Json -Depth 10) -ContentType 'application/json' | Out-Null`
 
-  switch (policy.id) {
+  // TB002 = EXO cmdlet (no Graph P1 needed), TB011/TB016 = free tenant settings
+  const TB_FREE = new Set(['TB002', 'TB011', 'TB016'])
+  const lw = TB_FREE.has(policy.id) ? null
+    : licWarn('$_licP1', policy.id, 'Azure AD Premium P1 required — authentication and tenant security configuration needs Entra ID P1 (included in E3, E5, Business Premium)')
+
+  const _raw = (() => { switch (policy.id) {
     case 'TB002': return policyBlock(policy.id, policy.name,
       `Set-OrganizationConfig -OAuth2ClientProfileEnabled ${$e} -ErrorAction SilentlyContinue | Out-Null`)
 
@@ -962,7 +1087,11 @@ if ($existing) {
 
     default: return skipBlock(policy.id, policy.name,
       `Configure in Microsoft Entra admin centre. ${policy.description}`)
-  }
+  } })()
+  if (!lw) return _raw
+  return _raw.includes('\ntry {\n')
+    ? _raw.replace('\ntry {\n', `\ntry {\n    ${lw}\n`)
+    : _raw
 }
 
 // ─── Dispatch ─────────────────────────────────────────────────────────────────
@@ -1013,6 +1142,7 @@ function buildScript(policies, credentials, prefix, authMode = 'interactive', po
   if (hasExo)   parts.push(buildConnectExo(credentials, authMode))
   if (hasIpps)  parts.push(buildConnectIpps(credentials, authMode))
 
+  if (hasGraph) parts.push(buildLicenseCheckScript())
   parts.push('')
   for (const policy of policies) {
     parts.push(buildPolicyScript(policy, policyConfigs[policy.id] || {}, prefix))
@@ -1027,7 +1157,7 @@ function buildScript(policies, credentials, prefix, authMode = 'interactive', po
 // Builds only the policy creation blocks — no auth, no module imports, no disconnect.
 // Used when running through an already-authenticated persistent session.
 function buildPoliciesScript(policies, prefix, policyConfigs = {}) {
-  const parts = [PS_PREFS, '']
+  const parts = [PS_PREFS, '', buildLicenseCheckScript()]
   for (const policy of policies) {
     parts.push(buildPolicyScript(policy, policyConfigs[policy.id] || {}, prefix))
   }
