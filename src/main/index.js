@@ -13,7 +13,7 @@ async function gracefulDisconnect(win) {
   }
   await Promise.race([
     psSession.disconnect(),
-    new Promise(r => setTimeout(r, 3000)),
+    new Promise(r => setTimeout(r, 10000)),
   ]).catch(() => {})
 }
 
@@ -32,7 +32,7 @@ function createWindow() {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       webSecurity: true,
     },
   })
@@ -60,6 +60,13 @@ function createWindow() {
     gracefulDisconnect(win).then(() => win.destroy())
   })
 }
+
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught exception:', err.message, err.stack)
+})
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled rejection:', reason instanceof Error ? reason.message : String(reason))
+})
 
 app.whenReady().then(() => {
   logger.info(`App started v${app.getVersion()} platform=${process.platform}`)

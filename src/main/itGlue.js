@@ -1,5 +1,6 @@
 const axios = require('axios')
-const store = require('./store')
+const { store, getApiKey } = require('./store')
+const logger = require('./logger')
 
 class ItGlueClient {
   constructor() {
@@ -7,7 +8,7 @@ class ItGlueClient {
   }
 
   getClient() {
-    const apiKey = store.get('itGlueApiKey')
+    const apiKey = getApiKey()
     const baseURL = (store.get('itGlueBaseUrl') || 'https://api.eu.itglue.com').replace(/\/$/, '')
     this._client = axios.create({
       baseURL,
@@ -42,7 +43,7 @@ class ItGlueClient {
   }
 
   async getOrganizations() {
-    const apiKey = store.get('itGlueApiKey')
+    const apiKey = getApiKey()
     if (!apiKey) return []
 
     const client = this.getClient()
@@ -75,7 +76,7 @@ class ItGlueClient {
         page++
       }
     } catch (err) {
-      console.error('IT Glue getOrganizations error:', err.response?.status, err.message)
+      logger.error('IT Glue getOrganizations error:', err.response?.status, err.message)
       // Try a simple unfiltered fallback
       try {
         const resp = await client.get(`/organizations?page[size]=100&page[number]=1`)
@@ -105,7 +106,7 @@ class ItGlueClient {
         password: p.attributes?.password || '',
       }))
     } catch (err) {
-      console.error('IT Glue getPasswords error:', err.response?.status, err.message)
+      logger.error('IT Glue getPasswords error:', err.response?.status, err.message)
       return []
     }
   }
