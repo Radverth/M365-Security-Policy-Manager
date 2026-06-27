@@ -469,17 +469,36 @@ function buildIPScript(policy, config) {
   const enabled = (config.state || 'enabled') === 'enabled'
   const state = enabled ? 'enabled' : 'disabled'
 
+  // PATCH then GET to verify state was actually applied.
+  // The PATCH can return HTTP 200 even if the tenant lacks AAD P2 licensing, so we
+  // confirm the persisted state after the write and warn if it didn't take effect.
+  const graphPatchVerified = (uri, body, verifyNote) => {
+    const riskLevelsExpr = verifyNote
+    return `Write-Output "  INFO: Requires Azure AD Premium P2 licensing to enforce"
+$_body = ${body} | ConvertTo-Json -Depth 10
+Invoke-MgGraphRequest -Method PATCH -Uri '${uri}' -Body $_body -ContentType 'application/json' | Out-Null
+$_r = Invoke-MgGraphRequest -Method GET -Uri '${uri}' -OutputType PSObject
+Write-Output "  Confirmed: state=$($_r.state)${riskLevelsExpr}"
+if ($_r.state -ne '${state}') { Write-Output "  WARNING: state was not applied — verify your tenant has Azure AD Premium P2 licensing" }`
+  }
+
   const graphPatch = (uri, body) =>
     `Invoke-MgGraphRequest -Method PATCH -Uri '${uri}' -Body (${body} | ConvertTo-Json -Depth 10) -ContentType 'application/json' | Out-Null`
 
   switch (policy.id) {
     case 'IP001': return policyBlock(policy.id, policy.name,
-      graphPatch('https://graph.microsoft.com/beta/identityProtection/policies/signInRiskPolicy',
-        `@{ state = '${state}'; conditions = @{ signInRiskLevels = @('medium', 'high') }; grantControls = @{ operator = 'OR'; builtInControls = @('mfa') } }`))
+      graphPatchVerified(
+        'https://graph.microsoft.com/beta/identityProtection/policies/signInRiskPolicy',
+        `@{ state = '${state}'; conditions = @{ signInRiskLevels = @('medium', 'high') }; grantControls = @{ operator = 'OR'; builtInControls = @('mfa') } }`,
+        `, signInRiskLevels=$($_r.conditions.signInRiskLevels -join ',')`
+      ))
 
     case 'IP002': return policyBlock(policy.id, policy.name,
-      graphPatch('https://graph.microsoft.com/beta/identityProtection/policies/userRiskPolicy',
-        `@{ state = '${state}'; conditions = @{ userRiskLevels = @('medium', 'high') }; grantControls = @{ operator = 'OR'; builtInControls = @('passwordChange') } }`))
+      graphPatchVerified(
+        'https://graph.microsoft.com/beta/identityProtection/policies/userRiskPolicy',
+        `@{ state = '${state}'; conditions = @{ userRiskLevels = @('medium', 'high') }; grantControls = @{ operator = 'OR'; builtInControls = @('passwordChange') } }`,
+        `, userRiskLevels=$($_r.conditions.userRiskLevels -join ',')`
+      ))
 
     case 'IP003': return policyBlock(policy.id, policy.name,
       graphPatch('https://graph.microsoft.com/v1.0/policies/authenticationMethodsPolicy/authenticationMethodConfigurations/microsoftAuthenticator',

@@ -31,15 +31,32 @@ class PersistentPsSession {
   async start(win) {
     if (this._readyPromise) return this._readyPromise  // prevent double-start
     this._win = win
-    const pwshPath = process.platform === 'win32' ? 'pwsh.exe' : 'pwsh'
-    this.proc = spawn(pwshPath, ['-NoProfile', '-NonInteractive', '-Command', '-'], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
-    })
 
     const sendToWin = (channel, msg) => {
       if (win && !win.isDestroyed()) win.webContents.send(channel, msg)
     }
+
+    // Try pwsh (PS7) first; fall back to powershell.exe (PS5) if pwsh is not installed.
+    // Resolves with the spawned process, or null if the executable was not found (ENOENT).
+    const trySpawn = (exe) => new Promise((resolve) => {
+      if (!exe) return resolve(null)
+      const p = spawn(exe, ['-NoProfile', '-NonInteractive', '-Command', '-'], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env },
+      })
+      p.once('error', (e) => resolve(e.code === 'ENOENT' ? null : p))
+      p.once('spawn', () => { p.removeAllListeners('error'); resolve(p) })
+    })
+
+    const ps7 = process.platform === 'win32' ? 'pwsh.exe' : 'pwsh'
+    const ps5 = process.platform === 'win32' ? 'powershell.exe' : null
+
+    this.proc = await trySpawn(ps7)
+    if (!this.proc) {
+      sendToWin('ps:error', 'PowerShell 7 (pwsh) not found — falling back to Windows PowerShell 5. Module loading will be slower (~30-60s) and some features may be limited.')
+      this.proc = await trySpawn(ps5)
+    }
+    if (!this.proc) throw new Error('PowerShell not found. Please install PowerShell 7 from https://aka.ms/powershell')
 
     this.proc.stdout.on('data', (data) => {
       for (const raw of data.toString().split(/\r?\n/)) {
@@ -67,23 +84,28 @@ class PersistentPsSession {
       this._ready = false; this._readyPromise = null
     })
 
-    // Bootstrap: load all Graph modules in parallel (pwsh 7 ForEach-Object -Parallel).
-    // Sequential imports took 30-60s; parallel loads all six concurrently in ~10s.
+    // Bootstrap: load Graph modules. On PS7, load all six concurrently (~10s).
+    // On PS5, fall back to sequential imports (~30-60s). The PS version check runs
+    // inside PowerShell itself so the same script works regardless of which executable
+    // was selected above.
     this._readyPromise = this._exec(
       `$ProgressPreference='SilentlyContinue'
 $VerbosePreference='SilentlyContinue'
-@(
+$_mods = @(
   'Microsoft.Graph.Authentication',
   'Microsoft.Graph.Identity.SignIns',
   'Microsoft.Graph.Users',
   'Microsoft.Graph.Groups',
   'Microsoft.Graph.Identity.DirectoryManagement',
   'Microsoft.Graph.DeviceManagement'
-) | ForEach-Object -Parallel {
-  Import-Module $_ -ErrorAction SilentlyContinue
-} -ThrottleLimit 6
+)
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+  $_mods | ForEach-Object -Parallel { Import-Module $_ -ErrorAction SilentlyContinue } -ThrottleLimit 6
+} else {
+  $_mods | ForEach-Object { Import-Module $_ -ErrorAction SilentlyContinue }
+}
 `,
-      null, 60000
+      null, 90000
     ).then(() => { this._ready = true })
 
     return this._readyPromise

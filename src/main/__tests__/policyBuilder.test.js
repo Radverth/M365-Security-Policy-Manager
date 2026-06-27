@@ -299,6 +299,13 @@ describe('IP001 - Sign-In Risk Policy', () => {
     expect(s).toContain("signInRiskLevels = @('medium', 'high')")
     expect(s).toContain("builtInControls = @('mfa')")
   })
+  test('verifies state after PATCH with GET', () => {
+    expect(s).toContain('Method GET')
+    expect(s).toContain('Confirmed: state=')
+  })
+  test('warns about P2 licensing requirement', () => {
+    expect(s).toContain('Azure AD Premium P2')
+  })
 })
 
 describe('IP002 - User Risk Policy', () => {
@@ -307,6 +314,13 @@ describe('IP002 - User Risk Policy', () => {
 
   test('patches userRiskPolicy endpoint', () => {
     expect(s).toContain('userRiskPolicy')
+  })
+  test('verifies state after PATCH with GET', () => {
+    expect(s).toContain('Method GET')
+    expect(s).toContain('Confirmed: state=')
+  })
+  test('warns about P2 licensing requirement', () => {
+    expect(s).toContain('Azure AD Premium P2')
   })
 })
 
