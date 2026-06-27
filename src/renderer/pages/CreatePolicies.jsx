@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } from 'react'
 import useStore from '../store'
-import { POLICIES, POLICIES_BY_CATEGORY } from '../../shared/constants'
+import { POLICIES, POLICIES_BY_CATEGORY, LICENSE_LABELS, LICENSE_SHORT } from '../../shared/constants'
 import ProgressStep from '../components/ProgressStep'
 import Card from '../components/Card'
 import Button from '../components/Button'
@@ -395,21 +395,41 @@ const SEVERITY_DOT = {
   info: 'bg-gray-400',
 }
 
-const PolicyGridItem = React.memo(function PolicyGridItem({ p, isSelected, toggle }) {
+const PolicyGridItem = React.memo(function PolicyGridItem({ p, isSelected, toggle, tenantLicenses }) {
+  const missingLics = tenantLicenses && p.requiredLicenses?.length
+    ? p.requiredLicenses.filter(lic => !tenantLicenses[lic])
+    : []
+  const isLocked = missingLics.length > 0
+
+  const badgeLabel = missingLics.length === 1
+    ? (LICENSE_SHORT[missingLics[0]] || missingLics[0])
+    : missingLics.length > 1
+    ? `${missingLics.length} licenses`
+    : null
+
+  const title = isLocked
+    ? `Requires: ${missingLics.map(l => LICENSE_LABELS[l] || l).join(', ')}`
+    : undefined
+
   return (
     <button
-      onClick={() => toggle(p.id)}
+      onClick={() => !isLocked && toggle(p.id)}
+      disabled={isLocked}
+      title={title}
       className={[
         'flex items-center gap-2 px-3 py-2 rounded-lg border text-left transition-colors w-full',
-        isSelected
+        isLocked
+          ? 'opacity-50 cursor-not-allowed bg-gray-50 border-gray-200'
+          : isSelected
           ? 'bg-navy/5 border-navy/25'
           : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50',
       ].join(' ')}
     >
       <div className={`w-4 h-4 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
+        isLocked ? 'border-gray-200 bg-gray-100' :
         isSelected ? 'bg-navy border-navy' : 'border-gray-300'
       }`}>
-        {isSelected && (
+        {isSelected && !isLocked && (
           <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
@@ -417,7 +437,13 @@ const PolicyGridItem = React.memo(function PolicyGridItem({ p, isSelected, toggl
       </div>
       <span className="text-xs font-mono text-gray-400 w-10 flex-shrink-0">{p.id}</span>
       <span className="text-xs text-gray-800 flex-1 min-w-0 truncate">{p.name}</span>
-      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${SEVERITY_DOT[p.severity] || 'bg-gray-400'}`} title={p.severity} />
+      {isLocked && badgeLabel ? (
+        <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium flex-shrink-0 whitespace-nowrap">
+          {badgeLabel}
+        </span>
+      ) : (
+        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${SEVERITY_DOT[p.severity] || 'bg-gray-400'}`} title={p.severity} />
+      )}
     </button>
   )
 })
@@ -427,6 +453,7 @@ function StepSelectPolicies({ selected, setSelected }) {
   const [search, setSearch] = useState('')
   const selSet = useMemo(() => new Set(selected), [selected])
   const categories = Object.keys(POLICIES_BY_CATEGORY)
+  const tenantLicenses = useStore(s => s.tenantLicenses)
 
   // Defer the expensive filter/render pass so typing the search box stays instant
   const deferredSearch = useDeferredValue(search)
@@ -543,7 +570,7 @@ function StepSelectPolicies({ selected, setSelected }) {
                   </div>
                   <div className="grid grid-cols-2 gap-1.5">
                     {catPolicies.map(p => (
-                      <PolicyGridItem key={p.id} p={p} isSelected={selSet.has(p.id)} toggle={toggle} />
+                      <PolicyGridItem key={p.id} p={p} isSelected={selSet.has(p.id)} toggle={toggle} tenantLicenses={tenantLicenses} />
                     ))}
                   </div>
                 </div>
@@ -552,7 +579,7 @@ function StepSelectPolicies({ selected, setSelected }) {
           ) : (
             <div className="grid grid-cols-2 gap-1.5">
               {displayPolicies.map(p => (
-                <PolicyGridItem key={p.id} p={p} isSelected={selSet.has(p.id)} toggle={toggle} />
+                <PolicyGridItem key={p.id} p={p} isSelected={selSet.has(p.id)} toggle={toggle} tenantLicenses={tenantLicenses} />
               ))}
             </div>
           )}

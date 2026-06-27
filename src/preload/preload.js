@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('api', {
     connect: (credentials, authMode) => ipcRenderer.invoke('session:connect', credentials, authMode),
     disconnect: () => ipcRenderer.invoke('session:disconnect'),
     getContext: () => ipcRenderer.invoke('session:getContext'),
+    getLicenses: () => ipcRenderer.invoke('session:getLicenses'),
   },
 
   // Policies
@@ -106,8 +107,8 @@ contextBridge.exposeInMainWorld('api', {
   // Report
   report: {
     audit: () => ipcRenderer.invoke('report:audit'),
-    savePDF: (orgName, policies, nameMap, recommendations) => ipcRenderer.invoke('app:savePDF', orgName, policies, nameMap, recommendations),
-    saveDocx: (orgName, policies, nameMap, recommendations, accountManager) => ipcRenderer.invoke('app:saveDocx', orgName, policies, nameMap, recommendations, accountManager),
+    savePDF: (orgName, policies, nameMap, recommendations, licenses) => ipcRenderer.invoke('app:savePDF', orgName, policies, nameMap, recommendations, licenses),
+    saveDocx: (orgName, policies, nameMap, recommendations, accountManager, licenses) => ipcRenderer.invoke('app:saveDocx', orgName, policies, nameMap, recommendations, accountManager, licenses),
   },
 
   // Tenant entity search (used by EntityPicker in the editor UI)

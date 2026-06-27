@@ -604,6 +604,7 @@ function ReportView({ orgName, tenantPolicies, nameMap = {}, date, selectedBasel
   const [savingDocx, setSavingDocx] = useState(false)
   const [savedModal, setSavedModal] = useState(null) // { type: 'pdf'|'docx', path: string }
   const [accountManager, setAccountManager] = useState(ACCOUNT_MANAGERS[0])
+  const tenantLicenses = useStore(s => s.tenantLicenses)
   const enabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabled').length
   const reportOnly = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'enabledForReportingButNotEnforced').length
   const disabled = tenantPolicies.filter(p => pick(p, 'State', 'state') === 'disabled').length
@@ -615,7 +616,7 @@ function ReportView({ orgName, tenantPolicies, nameMap = {}, date, selectedBasel
   async function handleExportPDF() {
     setSavingPDF(true)
     try {
-      const result = await window.api.report.savePDF(orgName, tenantPolicies, nameMap, recommendations)
+      const result = await window.api.report.savePDF(orgName, tenantPolicies, nameMap, recommendations, tenantLicenses)
       if (result?.path) setSavedModal({ type: 'pdf', path: result.path })
     } catch {} finally {
       setSavingPDF(false)
@@ -625,7 +626,7 @@ function ReportView({ orgName, tenantPolicies, nameMap = {}, date, selectedBasel
   async function handleExportDocx() {
     setSavingDocx(true)
     try {
-      const result = await window.api.report.saveDocx(orgName, tenantPolicies, nameMap, recommendations, accountManager)
+      const result = await window.api.report.saveDocx(orgName, tenantPolicies, nameMap, recommendations, accountManager, tenantLicenses)
       if (result?.path) setSavedModal({ type: 'docx', path: result.path })
       else if (result?.error) alert(`Export failed: ${result.error}`)
     } catch (e) {

@@ -153,6 +153,9 @@ const useStore = create((set, get) => ({
   setTenantSession: (session) => set({ tenantSession: session }),
   clearTenantSession: () => set({ tenantSession: null }),
 
+  tenantLicenses: null, // { p1, p2, intune, defender, purview, exchange, sharepoint, teams } | null
+  setTenantLicenses: (licenses) => set({ tenantLicenses: licenses }),
+
   connectModalOpen: false,
   openConnectModal: () => set({ connectModalOpen: true }),
   closeConnectModal: () => set({ connectModalOpen: false }),
@@ -163,14 +166,20 @@ const useStore = create((set, get) => ({
 
   disconnectSession: async () => {
     try { await window.api?.session?.disconnect() } catch {}
-    set({ tenantSession: null, switchModalOpen: false, connectModalOpen: true })
+    set({ tenantSession: null, tenantLicenses: null, switchModalOpen: false, connectModalOpen: true })
   },
 
   sessionCheckDone: false,
   checkExistingSession: async () => {
     if (!window.api?.session) { set({ sessionCheckDone: true }); return }
     const ctx = await window.api.session.getContext()
-    if (ctx) set({ tenantSession: ctx })
+    if (ctx) {
+      set({ tenantSession: ctx })
+      try {
+        const lic = await window.api.session.getLicenses()
+        if (lic) set({ tenantLicenses: lic })
+      } catch {}
+    }
     set({ sessionCheckDone: true })
   },
 

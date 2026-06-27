@@ -544,7 +544,7 @@ function ItGlueConnectPanel({ credentials, setCredentials }) {
 }
 
 function ConnectModal() {
-  const { connectModalOpen, closeConnectModal, setTenantSession } = useStore()
+  const { connectModalOpen, closeConnectModal, setTenantSession, setTenantLicenses } = useStore()
   const [authMode, setAuthMode] = useState('itglue')
   const [credentials, setCredentials] = useState(null)
   const [username, setUsername] = useState('')
@@ -590,6 +590,7 @@ function ConnectModal() {
         setError(result.error)
       } else {
         setTenantSession(result.context)
+        if (result.licenses) setTenantLicenses(result.licenses)
         closeConnectModal()
       }
     } catch (err) {
