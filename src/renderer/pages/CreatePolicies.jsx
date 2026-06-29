@@ -401,14 +401,19 @@ const PolicyGridItem = React.memo(function PolicyGridItem({ p, isSelected, toggl
     : []
   const isLocked = missingLics.length > 0
 
-  const badgeLabel = missingLics.length === 1
-    ? (LICENSE_SHORT[missingLics[0]] || missingLics[0])
-    : missingLics.length > 1
-    ? `${missingLics.length} licenses`
+  // Always show a license badge when the policy has requirements
+  const licBadgeLabel = isLocked
+    ? (missingLics.length === 1 ? (LICENSE_SHORT[missingLics[0]] || missingLics[0]) : `${missingLics.length} licenses`)
+    : p.requiredLicenses?.length === 1
+    ? (LICENSE_SHORT[p.requiredLicenses[0]] || p.requiredLicenses[0])
+    : p.requiredLicenses?.length > 1
+    ? `${p.requiredLicenses.length} licenses`
     : null
 
   const title = isLocked
-    ? `Requires: ${missingLics.map(l => LICENSE_LABELS[l] || l).join(', ')}`
+    ? `Missing: ${missingLics.map(l => LICENSE_LABELS[l] || l).join(', ')}`
+    : p.requiredLicenses?.length
+    ? `Requires: ${p.requiredLicenses.map(l => LICENSE_LABELS[l] || l).join(', ')}`
     : undefined
 
   return (
@@ -437,9 +442,13 @@ const PolicyGridItem = React.memo(function PolicyGridItem({ p, isSelected, toggl
       </div>
       <span className="text-xs font-mono text-gray-400 w-10 flex-shrink-0">{p.id}</span>
       <span className="text-xs text-gray-800 flex-1 min-w-0 truncate">{p.name}</span>
-      {isLocked && badgeLabel ? (
-        <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium flex-shrink-0 whitespace-nowrap">
-          {badgeLabel}
+      {licBadgeLabel ? (
+        <span className={`text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 whitespace-nowrap ${
+          isLocked
+            ? 'bg-amber-100 text-amber-700'
+            : 'bg-gray-100 text-gray-500'
+        }`}>
+          {licBadgeLabel}
         </span>
       ) : (
         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${SEVERITY_DOT[p.severity] || 'bg-gray-400'}`} title={p.severity} />
