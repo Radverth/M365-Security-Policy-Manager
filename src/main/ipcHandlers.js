@@ -1,5 +1,5 @@
 const { ipcMain, app, shell, dialog, BrowserWindow } = require('electron')
-const { checkPowerShell, runScript } = require('./powershell')
+const { checkPowerShell, runScript, getPwshPath } = require('./powershell')
 const { getModuleStatus, installModules, updateModules, unknownModuleStatus } = require('./moduleManager')
 const itGlue = require('./itGlue')
 const { buildScript, buildConnectGraph, buildPoliciesScript, needsExo, needsIpps } = require('./policyBuilder')
@@ -1653,6 +1653,47 @@ function registerIpcHandlers(win) {
         resolve({ success: false, message: err.message })
       })
     })
+  })
+
+  // Diagnostics / dry run — generates and validates policy scripts without
+  // deploying anything. No tenant connection is used or required.
+  ipcMain.handle('diagnostics:dryRun', async (_, options = {}) => {
+    logger.info(`IPC: diagnostics:dryRun categories=${options.categories?.join(',') || 'all'} ids=${options.policyIds?.length || 'all'}`)
+    try {
+      const { runDryRun } = require('./dryRun')
+      const report = await runDryRun({ ...options, pwshPath: getPwshPath() })
+      logger.info(`diagnostics:dryRun complete — total=${report.summary.total} errors=${report.summary.errors} warnings=${report.summary.warnings} in ${report.meta.durationMs}ms`)
+      return report
+    } catch (err) {
+      logger.error(`diagnostics:dryRun failed: ${err.message}`)
+      return { error: err.message }
+    }
+  })
+
+  ipcMain.handle('diagnostics:export', async (_, report, format) => {
+    try {
+      const { reportToMarkdown } = require('./dryRun')
+      const formats = {
+        json: { name: 'JSON report', ext: 'json', content: () => JSON.stringify(report, null, 2) },
+        md:   { name: 'Markdown report', ext: 'md', content: () => reportToMarkdown(report) },
+        ps1:  { name: 'PowerShell script', ext: 'ps1', content: () => report.fullScript || '' },
+      }
+      const f = formats[format]
+      if (!f) return { error: `Unknown export format: ${format}` }
+      const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')
+      const { canceled, filePath } = await dialog.showSaveDialog(_win, {
+        title: 'Export dry-run report',
+        defaultPath: `m365-dry-run-${ts}.${f.ext}`,
+        filters: [{ name: f.name, extensions: [f.ext] }],
+      })
+      if (canceled || !filePath) return { canceled: true }
+      fs.writeFileSync(filePath, f.content(), 'utf8')
+      logger.info(`diagnostics:export wrote ${filePath}`)
+      return { success: true, filePath }
+    } catch (err) {
+      logger.error(`diagnostics:export failed: ${err.message}`)
+      return { error: err.message }
+    }
   })
 
   // IT Glue
