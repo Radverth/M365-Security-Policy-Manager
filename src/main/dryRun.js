@@ -163,6 +163,15 @@ const CONNECTION_MODULES = {
   ipps: ['ExchangeOnlineManagement'],
 }
 
+function licenseLabelsFor(policy) {
+  const { LICENSE_LABELS, LICENSE_SHORT } = getCatalog()
+  return (policy.requiredLicenses || []).map((k) => ({
+    key: k,
+    label: LICENSE_LABELS[k] || k,
+    short: LICENSE_SHORT[k] || k,
+  }))
+}
+
 function analyzePolicy(policy, config, prefix) {
   const errors = []
   const warnings = []
@@ -181,6 +190,7 @@ function analyzePolicy(policy, config, prefix) {
       reason: `Script generation threw: ${err.message}`,
       connection: connectionFor(policy),
       requiredLicenses: policy.requiredLicenses || [],
+      licenses: licenseLabelsFor(policy),
       cmdlets: [],
       errors: [`Script generation threw: ${err.message}`],
       warnings: [],
@@ -216,6 +226,7 @@ function analyzePolicy(policy, config, prefix) {
     reason,
     connection: connectionFor(policy),
     requiredLicenses: policy.requiredLicenses || [],
+    licenses: licenseLabelsFor(policy),
     cmdlets: extractCmdlets(script),
     errors,
     warnings,
@@ -410,8 +421,21 @@ async function runDryRun(options = {}) {
     if (e.status === 'warning') c.warnings++
   }
 
-  const licensesNeeded = [...new Set(entries.flatMap((e) => e.requiredLicenses))]
-    .map((k) => catalog.LICENSE_LABELS[k] || k)
+  // Licence requirements across this scope — which licences are needed, what
+  // plans include them, and exactly which policies depend on each.
+  const licenseKeys = [...new Set(entries.flatMap((e) => e.requiredLicenses))]
+  const licenses = licenseKeys.map((k) => {
+    const dependent = entries.filter((e) => e.requiredLicenses.includes(k))
+    return {
+      key: k,
+      label: catalog.LICENSE_LABELS[k] || k,
+      short: catalog.LICENSE_SHORT[k] || k,
+      plans: catalog.LICENSE_PLANS[k] || null,
+      policyCount: dependent.length,
+      policyIds: dependent.map((e) => e.id),
+    }
+  }).sort((a, b) => b.policyCount - a.policyCount)
+  const noLicensePolicies = entries.filter((e) => e.requiredLicenses.length === 0)
 
   const report = {
     meta: {
@@ -447,7 +471,8 @@ async function runDryRun(options = {}) {
           installedVersion: installedModules ? (installedModules[m] || null) : undefined,
         })),
       })),
-      licensesNeeded,
+      licenses,
+      noLicensePolicyCount: noLicensePolicies.length,
       fullScriptErrors,
     },
     policies: entries,
@@ -507,10 +532,23 @@ function reportToMarkdown(report) {
   }
   lines.push('')
 
-  if (summary.licensesNeeded.length) {
-    lines.push('### Licences referenced by this scope')
+  if (summary.licenses.length) {
+    lines.push('### Licence requirements')
     lines.push('')
-    for (const l of summary.licensesNeeded) lines.push(`- ${l}`)
+    lines.push('| Licence | Policies | Included in | Required by |')
+    lines.push('|---|---|---|---|')
+    for (const l of summary.licenses) {
+      const plans = (l.plans || '').replace(/^Included in:\s*/i, '') || '—'
+      const ids = l.policyIds.length > 12
+        ? `${l.policyIds.slice(0, 12).join(', ')} … (+${l.policyIds.length - 12} more)`
+        : l.policyIds.join(', ')
+      lines.push(`| ${l.label} | ${l.policyCount} | ${plans} | ${ids} |`)
+    }
+    if (summary.noLicensePolicyCount > 0) {
+      lines.push(`| _No specific licence_ | ${summary.noLicensePolicyCount} | Any Microsoft 365 subscription | |`)
+    }
+    lines.push('')
+    lines.push('> A policy listing multiple licences requires **all** of them (e.g. device-compliance Conditional Access needs Entra ID P1 **and** Intune). At deploy time the app also detects the tenant\'s actual licences and emits a WARNING line for any policy the tenant isn\'t licensed for.')
     lines.push('')
   }
 
@@ -527,11 +565,12 @@ function reportToMarkdown(report) {
   for (const cat of cats) {
     lines.push(`### ${cat}`)
     lines.push('')
-    lines.push('| | ID | Name | Action | Syntax | Notes |')
-    lines.push('|---|---|---|---|---|---|')
+    lines.push('| | ID | Name | Action | Syntax | Licences | Notes |')
+    lines.push('|---|---|---|---|---|---|---|')
     for (const p of policies.filter((x) => x.category === cat)) {
       const notes = [...p.errors, ...p.warnings, ...(p.reason ? [p.reason] : [])].join('; ').replace(/\|/g, '\\|')
-      lines.push(`| ${STATUS_ICON[p.status] || '?'} | ${p.id} | ${p.name.replace(/\|/g, '\\|')} | ${p.action} | ${p.syntax.status} | ${notes} |`)
+      const lic = (p.licenses || []).map((l) => l.short).join(' + ') || '—'
+      lines.push(`| ${STATUS_ICON[p.status] || '?'} | ${p.id} | ${p.name.replace(/\|/g, '\\|')} | ${p.action} | ${p.syntax.status} | ${lic} | ${notes} |`)
     }
     lines.push('')
   }
@@ -577,7 +616,8 @@ function reportToText(report, useColor = false) {
     for (const p of policies.filter((x) => x.category === cat)) {
       const icon = p.status === 'ok' ? green('✓') : p.status === 'warning' ? yellow('⚠') : red('✗')
       const action = p.action === 'deploy' ? green('deploy') : yellow('manual')
-      lines.push(`  ${icon} ${p.id}  ${p.name.padEnd(52).slice(0, 52)} ${action}${p.syntax.status === 'ok' ? dim('  syntax ok') : p.syntax.status === 'error' ? red('  SYNTAX ERROR') : ''}`)
+      const lic = (p.licenses || []).length ? dim(`  [${p.licenses.map((l) => l.short).join(' + ')}]`) : ''
+      lines.push(`  ${icon} ${p.id}  ${p.name.padEnd(52).slice(0, 52)} ${action}${p.syntax.status === 'ok' ? dim('  syntax ok') : p.syntax.status === 'error' ? red('  SYNTAX ERROR') : ''}${lic}`)
       for (const e of p.errors) lines.push(red(`      ✗ ${e}`))
       for (const w of p.warnings) lines.push(yellow(`      ⚠ ${w}`))
       if (p.reason) lines.push(dim(`      · ${p.reason}`))
@@ -590,6 +630,17 @@ function reportToText(report, useColor = false) {
   for (const conn of summary.connections) {
     const mods = conn.modules.map((m) => `${m.name}${m.installedVersion === undefined ? '' : m.installedVersion ? ` (${m.installedVersion})` : red(' (missing)')}`).join(', ')
     lines.push(dim(`  ${conn.label}: ${conn.policyCount} policies — needs ${mods}`))
+  }
+  if (summary.licenses.length) {
+    lines.push('')
+    lines.push(bold('── Licence requirements ' + '─'.repeat(38)))
+    for (const l of summary.licenses) {
+      const plans = (l.plans || '').replace(/^Included in:\s*/i, '')
+      lines.push(`  ${l.label} — ${l.policyCount} ${l.policyCount === 1 ? 'policy' : 'policies'}${plans ? dim(` (included in: ${plans})`) : ''}`)
+    }
+    if (summary.noLicensePolicyCount > 0) {
+      lines.push(dim(`  No specific licence — ${summary.noLicensePolicyCount} policies (any Microsoft 365 subscription)`))
+    }
   }
   if (summary.fullScriptErrors.length) {
     lines.push(red(`  Full script issues:`))

@@ -135,6 +135,7 @@ Open **Diagnostics** to test every policy module without deploying anything:
 - Runs structural checks (output markers, error handling, balanced delimiters) on every generated script
 - Parses every script with the real PowerShell parser to surface syntax errors — nothing is executed and no tenant connection is made
 - Flags manual-only policies, missing PowerShell modules, and Graph beta endpoint usage
+- Shows the licences each policy requires (e.g. Entra ID P1 + Intune) and which plans include them, plus a per-licence summary of every dependent policy
 - Exports the results as **JSON** (full machine-readable report for debugging), **Markdown** (readable report), or the assembled **.ps1** deployment script
 
 The same harness runs from the command line:

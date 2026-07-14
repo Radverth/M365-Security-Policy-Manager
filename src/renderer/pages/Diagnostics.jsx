@@ -3,7 +3,7 @@ import useStore from '../store'
 import Card from '../components/Card'
 import Badge from '../components/Badge'
 import Button from '../components/Button'
-import { POLICY_CATEGORIES, LICENSE_SHORT } from '../../shared/constants'
+import { POLICY_CATEGORIES, LICENSE_SHORT, LICENSE_LABELS, LICENSE_PLANS } from '../../shared/constants'
 
 const STATUS_META = {
   ok:      { badge: 'success', label: 'OK' },
@@ -91,6 +91,20 @@ function PolicyRow({ entry }) {
                 <p className="text-xs text-gray-600 flex items-start gap-1.5">
                   <span className="flex-shrink-0">·</span>{entry.reason}
                 </p>
+              )}
+              {(entry.requiredLicenses || []).length > 0 ? (
+                <div className="rounded-lg border border-navy-100 bg-navy-50/50 px-3 py-2 space-y-1">
+                  <p className="text-xs font-semibold text-navy">
+                    Requires {entry.requiredLicenses.length > 1 ? 'all of' : ''}: {entry.requiredLicenses.map((k) => LICENSE_LABELS[k] || k).join(' + ')}
+                  </p>
+                  {entry.requiredLicenses.map((k) => LICENSE_PLANS[k] && (
+                    <p key={k} className="text-[11px] text-gray-500">
+                      <span className="font-medium">{LICENSE_SHORT[k] || k}:</span> {LICENSE_PLANS[k].replace(/^Included in:\s*/i, 'included in ')}
+                    </p>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500">No specific licence required — works with any Microsoft 365 subscription.</p>
               )}
               {entry.cmdlets.length > 0 && (
                 <p className="text-xs text-gray-500">

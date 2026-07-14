@@ -162,6 +162,24 @@ describe('analyzePolicy', () => {
     const e = analyzePolicy(byId.IP001, defaultConfigFor(byId.IP001), '')
     expect(e.warnings.join(' ')).toMatch(/beta endpoint/)
   })
+
+  test('licence requirements are resolved to labels', () => {
+    const e = analyzePolicy(byId.CA007, defaultConfigFor(byId.CA007), '')
+    expect(e.requiredLicenses).toEqual(['p2'])
+    expect(e.licenses).toEqual([
+      { key: 'p2', label: 'Azure AD Premium P2', short: 'Entra P2' },
+    ])
+  })
+
+  test('multi-licence policy lists all of them', () => {
+    const e = analyzePolicy(byId.CA004, defaultConfigFor(byId.CA004), '')
+    expect(e.licenses.map((l) => l.short).sort()).toEqual(['Entra P1', 'Intune'])
+  })
+
+  test('licence-free policy has an empty list', () => {
+    const e = analyzePolicy(byId.AS019, defaultConfigFor(byId.AS019), '')
+    expect(e.licenses).toEqual([])
+  })
 })
 
 // ─── Full dry run ─────────────────────────────────────────────────────────────
@@ -202,11 +220,28 @@ describe('runDryRun (full catalog, hermetic)', () => {
     expect(keys).toEqual(['exo', 'graph', 'ipps'])
   })
 
-  test('markdown export renders', () => {
+  test('licence summary covers every licence key with dependent policies', () => {
+    const keys = report.summary.licenses.map((l) => l.key).sort()
+    expect(keys).toEqual(['defender', 'exchange', 'intune', 'p1', 'p2', 'purview', 'sharepoint', 'teams'])
+    for (const l of report.summary.licenses) {
+      expect(l.label).toBeTruthy()
+      expect(l.plans).toMatch(/Included in/i)
+      expect(l.policyCount).toBe(l.policyIds.length)
+      expect(l.policyCount).toBeGreaterThan(0)
+    }
+    // per-licence counts + licence-free policies ≥ total (multi-licence policies count twice)
+    const counted = report.summary.licenses.reduce((a, l) => a + l.policyCount, 0)
+    expect(counted + report.summary.noLicensePolicyCount).toBeGreaterThanOrEqual(report.summary.total)
+  })
+
+  test('markdown export renders with licence requirements', () => {
     const md = reportToMarkdown(report)
     expect(md).toContain('# M365 Policy Manager — Dry Run Report')
     expect(md).toContain('| Category | Total |')
     expect(md).toContain('CA001')
+    expect(md).toContain('### Licence requirements')
+    expect(md).toContain('Azure AD Premium P2')
+    expect(md).toContain('Entra P1 + Intune') // per-policy licences column (CA004)
   })
 
   test('text export renders', () => {

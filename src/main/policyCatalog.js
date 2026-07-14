@@ -44,6 +44,8 @@ function getCatalog() {
     CATEGORY_FIELDS: constants.CATEGORY_FIELDS || {},
     POLICY_EXTRA_FIELDS: constants.POLICY_EXTRA_FIELDS || {},
     LICENSE_LABELS: constants.LICENSE_LABELS || {},
+    LICENSE_SHORT: constants.LICENSE_SHORT || {},
+    LICENSE_PLANS: constants.LICENSE_PLANS || {},
     BASELINES: baselines,
   }
   return _catalog
