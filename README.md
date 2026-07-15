@@ -127,6 +127,29 @@ Open **Manage Policies**, select a tenant, and the app fetches all existing Cond
 
 Open **Security Report** to generate a summary of the current security posture across the connected tenant.
 
+### 7. Diagnostics (Dry Run)
+
+Open **Diagnostics** to test every policy module without deploying anything:
+
+- Generates the exact PowerShell that would be run for each policy (default settings, optional name prefix)
+- Runs structural checks (output markers, error handling, balanced delimiters) on every generated script
+- Parses every script with the real PowerShell parser to surface syntax errors — nothing is executed and no tenant connection is made
+- Flags manual-only policies, missing PowerShell modules, and Graph beta endpoint usage
+- Shows the licences each policy requires (e.g. Entra ID P1 + Intune) and which plans include them, plus a per-licence summary of every dependent policy
+- Exports the results as **JSON** (full machine-readable report for debugging), **Markdown** (readable report), or the assembled **.ps1** deployment script
+
+The same harness runs from the command line:
+
+```bash
+npm run dryrun                          # all policies, exports to ./dry-run-output/
+npm run dryrun -- --category CA         # one category
+npm run dryrun -- --baseline zero-trust # a baseline set
+npm run dryrun -- --policy CA001,EX004  # specific policies
+npm run dryrun -- --help                # all options
+```
+
+The CLI exits non-zero when any policy has errors, so it can gate CI. The full policy catalog is also validated by the Jest suite (`npm test`).
+
 ---
 
 ## Policy Categories

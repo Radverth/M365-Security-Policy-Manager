@@ -11,6 +11,7 @@ import CreatePolicies from './pages/CreatePolicies'
 import ManagePolicies from './pages/ManagePolicies'
 import SecurityReport from './pages/SecurityReport'
 import Modules from './pages/Modules'
+import Diagnostics from './pages/Diagnostics'
 import Settings from './pages/Settings'
 import Baselines from './pages/Baselines'
 import UpdaterModal from './components/UpdaterModal'
@@ -226,6 +227,11 @@ function Sidebar({ modules, psStatus }) {
         <NavItem to="/modules" label="Modules" badge={moduleOpInProgress} icon={
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+          </svg>
+        } />
+        <NavItem to="/diagnostics" label="Diagnostics" icon={
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
           </svg>
         } />
         <NavItem to="/settings" label="Settings" icon={
@@ -738,6 +744,7 @@ export default function App() {
             <Route path="/manage" element={<PageWrapper><ErrorBoundary label="Manage Policies"><ManagePolicies /></ErrorBoundary></PageWrapper>} />
             <Route path="/baselines" element={<PageWrapper><ErrorBoundary label="Baselines"><Baselines /></ErrorBoundary></PageWrapper>} />
             <Route path="/modules" element={<PageWrapper><ErrorBoundary label="Modules"><Modules /></ErrorBoundary></PageWrapper>} />
+            <Route path="/diagnostics" element={<PageWrapper><ErrorBoundary label="Diagnostics"><Diagnostics /></ErrorBoundary></PageWrapper>} />
             <Route path="/settings" element={<PageWrapper><ErrorBoundary label="Settings"><Settings /></ErrorBoundary></PageWrapper>} />
           </Routes>
         </main>

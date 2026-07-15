@@ -20,6 +20,12 @@ contextBridge.exposeInMainWorld('api', {
     installPowerShell: () => ipcRenderer.invoke('modules:installPowerShell'),
   },
 
+  // Diagnostics / dry run
+  diagnostics: {
+    dryRun: (options) => ipcRenderer.invoke('diagnostics:dryRun', options),
+    export: (report, format) => ipcRenderer.invoke('diagnostics:export', report, format),
+  },
+
   // IT Glue
   itglue: {
     test: (apiKey) => ipcRenderer.invoke('itglue:test', apiKey),

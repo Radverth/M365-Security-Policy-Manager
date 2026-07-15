@@ -18,7 +18,9 @@
     "build:mac": "npm run build:renderer && electron-builder --mac --publish never",
     "build": "npm run build:renderer && electron-builder",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "dryrun": "node scripts/dry-run.js",
+    "dryrun:quiet": "node scripts/dry-run.js --quiet"
   },
   "jest": {
     "testEnvironment": "node",
@@ -37,6 +39,8 @@
     "files": [
       "src/main/**/*",
       "src/preload/**/*",
+      "src/shared/**/*",
+      "src/renderer/data/**/*",
       "dist-renderer/**/*",
       "scripts/**/*"
     ],

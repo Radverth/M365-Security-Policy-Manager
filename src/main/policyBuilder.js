@@ -1164,4 +1164,4 @@ function buildPoliciesScript(policies, prefix, policyConfigs = {}) {
   return parts.join('\n')
 }
 
-module.exports = { buildScript, buildConnectGraph, buildPoliciesScript, needsExo, needsIpps }
+module.exports = { buildScript, buildConnectGraph, buildPoliciesScript, buildPolicyScript, needsExo, needsIpps }
