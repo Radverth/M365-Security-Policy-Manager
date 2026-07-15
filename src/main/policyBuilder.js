@@ -201,14 +201,26 @@ try {
 $mgCred = $null; $mgPass = $null; [System.GC]::Collect()`
 }
 
+// The -Device switch (device code flow) only exists on PowerShell 7 — Windows
+// PowerShell 5.1 throws "A parameter cannot be found that matches parameter
+// name 'Device'". On 5.1 fall back to the interactive sign-in window.
+// A failed connection exits the script (like Graph) so the EXO/IPPS policy
+// blocks don't cascade into misleading "cmdlet not recognized" failures.
 function buildConnectExo(credentials, authMode) {
   if (authMode === 'interactive') {
-    return `Write-Output "CONNECTING: Exchange Online (device code)..."
+    return `Write-Output "CONNECTING: Exchange Online..."
 try {
-    Connect-ExchangeOnline -Device -ShowBanner:$false -ErrorAction Stop
+    if ($PSVersionTable.PSVersion.Major -ge 7) {
+        Write-Output "CONNECTING: Exchange Online (device code)..."
+        Connect-ExchangeOnline -Device -ShowBanner:$false -ErrorAction Stop
+    } else {
+        Write-Output "INFO: Device code sign-in needs PowerShell 7 - opening a sign-in window instead..."
+        Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+    }
     Write-Output "CONNECTED: Exchange Online"
 } catch {
     Write-Output "ERROR: EXO connect failed - $($_.Exception.Message)"
+    exit 1
 }`
   }
   const upn = credentials?.username ? `-UserPrincipalName '${safe(credentials.username)}'` : ''
@@ -218,17 +230,25 @@ try {
     Write-Output "CONNECTED: Exchange Online"
 } catch {
     Write-Output "ERROR: EXO connect failed - $($_.Exception.Message)"
+    exit 1
 }`
 }
 
 function buildConnectIpps(credentials, authMode) {
   if (authMode === 'interactive') {
-    return `Write-Output "CONNECTING: Security & Compliance (device code)..."
+    return `Write-Output "CONNECTING: Security & Compliance..."
 try {
-    Connect-IPPSSession -Device -ShowBanner:$false -ErrorAction Stop
+    if ($PSVersionTable.PSVersion.Major -ge 7) {
+        Write-Output "CONNECTING: Security & Compliance (device code)..."
+        Connect-IPPSSession -Device -ShowBanner:$false -ErrorAction Stop
+    } else {
+        Write-Output "INFO: Device code sign-in needs PowerShell 7 - opening a sign-in window instead..."
+        Connect-IPPSSession -ShowBanner:$false -ErrorAction Stop
+    }
     Write-Output "CONNECTED: Security & Compliance"
 } catch {
     Write-Output "ERROR: IPPS connect failed - $($_.Exception.Message)"
+    exit 1
 }`
   }
   const upn = credentials?.username ? `-UserPrincipalName '${safe(credentials.username)}'` : ''
@@ -238,6 +258,7 @@ try {
     Write-Output "CONNECTED: Security & Compliance"
 } catch {
     Write-Output "ERROR: IPPS connect failed - $($_.Exception.Message)"
+    exit 1
 }`
 }
 

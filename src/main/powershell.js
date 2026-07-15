@@ -85,7 +85,10 @@ function runScript(script, onData, onError) {
     const fullScript = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\ntry { ([System.IO.StreamWriter][Console]::Out).AutoFlush = $true } catch {}\n${script}`
 
     try {
-      fs.writeFileSync(tmpFile, fullScript, 'utf8')
+      // BOM is required: Windows PowerShell 5.1 reads BOM-less .ps1 files as ANSI,
+      // which corrupts any non-ASCII character in the script (em-dashes become
+      // smart quotes that terminate strings early).
+      fs.writeFileSync(tmpFile, '\ufeff' + fullScript, 'utf8')
     } catch (err) {
       reject(err)
       return
@@ -175,7 +178,8 @@ function runScriptVisible(script) {
     const fullScript = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n${script}`
 
     try {
-      fs.writeFileSync(tmpFile, fullScript, 'utf8')
+      // BOM required — Windows PowerShell 5.1 reads BOM-less .ps1 files as ANSI
+      fs.writeFileSync(tmpFile, '\ufeff' + fullScript, 'utf8')
     } catch (err) {
       reject(err)
       return

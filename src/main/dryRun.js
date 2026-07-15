@@ -244,7 +244,10 @@ async function validateSyntax(namedScripts, pwshPath) {
     const scriptsDir = path.join(dir, 'scripts')
     fs.mkdirSync(scriptsDir)
     for (const [name, script] of Object.entries(namedScripts)) {
-      fs.writeFileSync(path.join(scriptsDir, `${name}.ps1`), script, 'utf8')
+      // BOM required — deploy-time scripts are written with a BOM too, and
+      // Windows PowerShell 5.1 parses BOM-less files as ANSI, which corrupts
+      // non-ASCII characters (em-dashes decode as string-terminating quotes).
+      fs.writeFileSync(path.join(scriptsDir, `${name}.ps1`), '\ufeff' + script, 'utf8')
     }
     const runner = path.join(dir, 'runner.ps1')
     fs.writeFileSync(runner, `
