@@ -11,6 +11,8 @@ class PersistentPsSession {
     this.proc = null
     this.lineHandlers = []
     this.context = null  // { Account, TenantId }
+    this.exoConnected = false   // Exchange Online connected in this session
+    this.ippsConnected = false  // Security & Compliance connected in this session
     this._suppressUiOutput = false
     this._win = null
     this._ready = false        // true once bootstrap completes
@@ -108,12 +110,14 @@ class PersistentPsSession {
       clearTimeout(this._flushTimer)
       if (this._stdoutBuf) { const tail = this._stdoutBuf; this._stdoutBuf = ''; emitLine(tail) }
       this.proc = null; this.context = null; this.lineHandlers = []
+      this.exoConnected = false; this.ippsConnected = false
       this._ready = false; this._readyPromise = null
       sendToWin('session:disconnected')
     })
     this.proc.on('error', () => {
       if (this.proc !== proc) return
       this.proc = null; this.context = null; this.lineHandlers = []
+      this.exoConnected = false; this.ippsConnected = false
       this._ready = false; this._readyPromise = null
     })
 
@@ -261,11 +265,55 @@ try {
     return ctx
   }
 
+  // Connects Exchange Online / Security & Compliance inside this persistent
+  // session, so Exchange policies reuse one sign-in per tenant instead of
+  // re-authenticating on every deploy. The MSAL token cached by the Graph
+  // sign-in usually lets these connect without prompting at all; when a
+  // prompt is needed the device-code line streams to the UI like any other
+  // session output. No-op when already connected.
+  async _connectExoLike(kind, timeoutMs) {
+    if (!this.alive) throw new Error('No active session — connect a tenant first')
+    await this._ensureReady()
+    const flag = kind === 'ipps' ? 'ippsConnected' : 'exoConnected'
+    if (this[flag]) return
+    const label = kind === 'ipps' ? 'Security & Compliance' : 'Exchange Online'
+    const cmdlet = kind === 'ipps' ? 'Connect-IPPSSession' : 'Connect-ExchangeOnline'
+    const uriMatch = kind === 'ipps' ? 'compliance' : 'outlook'
+    const out = await this._exec(`
+try {
+  Import-Module ExchangeOnlineManagement -ErrorAction Stop
+  $_conn = @(Get-ConnectionInformation -ErrorAction SilentlyContinue) |
+    Where-Object { $_.State -eq 'Connected' -and "$($_.ConnectionUri)" -match '${uriMatch}' }
+  if (-not $_conn) {
+    Write-Output "CONNECTING: ${label}..."
+    if ($PSVersionTable.PSVersion.Major -ge 7) {
+      ${cmdlet} -Device -ShowBanner:$false -ErrorAction Stop
+    } else {
+      ${cmdlet} -ShowBanner:$false -ErrorAction Stop
+    }
+  }
+  Write-Output "CONNECTED: ${label}"
+} catch {
+  Write-Output "ERROR: ${label} connect failed - $($_.Exception.Message)"
+}`, null, timeoutMs)
+    const errLine = out.split('\n').find(l => l.trim().startsWith('ERROR:'))
+    if (errLine) throw new Error(errLine.trim().slice('ERROR:'.length).trim())
+    this[flag] = true
+  }
+
+  async connectExo(timeoutMs = 300000) { return this._connectExoLike('exo', timeoutMs) }
+  async connectIpps(timeoutMs = 300000) { return this._connectExoLike('ipps', timeoutMs) }
+
   async disconnect() {
     if (this.alive) {
       try {
         await this._exec('Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null', null, 10000)
       } catch {}
+      if (this.exoConnected || this.ippsConnected) {
+        try {
+          await this._exec('Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null', null, 15000)
+        } catch {}
+      }
     }
     this.kill()
   }
@@ -273,6 +321,7 @@ try {
   kill() {
     const p = this.proc
     this.proc = null; this.context = null; this.lineHandlers = []
+    this.exoConnected = false; this.ippsConnected = false
     this._ready = false; this._readyPromise = null
     if (p && !p.killed) {
       try { p.stdin.write('exit\n') } catch {}

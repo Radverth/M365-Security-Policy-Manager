@@ -640,7 +640,7 @@ function buildEXScript(policy, config, prefix) {
       const hcSpam = config.highConfidenceSpamAction || 'Quarantine'
       return policyBlock(policy.id, policy.name,
         `$pn = ${psStr(displayName)}
-$p = @{ SpamAction = '${safe(spam)}'; HighConfidenceSpamAction = '${safe(hcSpam)}'; PhishSpamAction = 'Quarantine'; HighConfidencePhishAction = 'Quarantine'; BulkThreshold = 6; MarkAsSpamSpfRecordHardFail = $true; EnableRegionBlockList = ${$e} }
+$p = @{ SpamAction = '${safe(spam)}'; HighConfidenceSpamAction = '${safe(hcSpam)}'; PhishSpamAction = 'Quarantine'; HighConfidencePhishAction = 'Quarantine'; BulkThreshold = 6; MarkAsSpamSpfRecordHardFail = 'On'; EnableRegionBlockList = ${$e} }
 if (Get-HostedContentFilterPolicy -Identity $pn -ErrorAction SilentlyContinue) {
     Set-HostedContentFilterPolicy -Identity $pn @p
 } else {
@@ -672,7 +672,7 @@ if (Get-SafeAttachmentPolicy -Identity $pn -ErrorAction SilentlyContinue) {
 
     case 'EX009': return policyBlock(policy.id, policy.name,
       `$pn = ${psStr(displayName)}
-$p = @{ IsEnabled = ${$e}; EnableSafeLinksForEmail = ${$e}; EnableSafeLinksForTeams = ${$e}; EnableSafeLinksForOffice = ${$e}; AllowClickThrough = $false; TrackClicks = $true; ScanUrls = $true; DeliverMessageAfterScan = $true }
+$p = @{ EnableSafeLinksForEmail = ${$e}; EnableSafeLinksForTeams = ${$e}; EnableSafeLinksForOffice = ${$e}; AllowClickThrough = $false; TrackClicks = $true; ScanUrls = $true; DeliverMessageAfterScan = $true }
 if (Get-SafeLinksPolicy -Identity $pn -ErrorAction SilentlyContinue) {
     Set-SafeLinksPolicy -Identity $pn @p
 } else {

@@ -1847,8 +1847,21 @@ function registerIpcHandlers(win) {
       }
     }
 
-    if (psSession.alive && !hasExo && !hasIpps) {
-      logger.info('IPC: policies:create — using persistent session (no re-auth)')
+    if (psSession.alive) {
+      // One sign-in per tenant: EXO/IPPS connect INSIDE the persistent session
+      // (first time only — subsequent deploys reuse the connection). Their
+      // device-code/output lines stream via the session's global handler.
+      logger.info(`IPC: policies:create — using persistent session${hasExo || hasIpps ? ' (EXO/IPPS in-session)' : ' (no re-auth)'}`)
+      try {
+        if (hasExo) await psSession.connectExo()
+        if (hasIpps) await psSession.connectIpps()
+      } catch (err) {
+        logger.warn(`policies:create — in-session connect failed: ${err.message}`)
+        const msg = `ERROR: ${err.message}`
+        logs.push(msg)
+        _win.webContents.send('ps:error', msg)
+        return { logs, results }
+      }
       _win.webContents.send('ps:output', 'CONNECTED: Using active tenant session — deploying policies...')
       const script = buildPoliciesScript(policies, prefix || '', policyConfigs || {})
       await psSession.run(script, parseResult, 300000)
@@ -1856,7 +1869,7 @@ function registerIpcHandlers(win) {
       return { logs, results }
     }
 
-    // Fall back to a new process with full auth (EXO/IPPS policies, or no session).
+    // Fall back to a new process with full auth (no persistent session at all).
     // This spawns a fresh pwsh with no global handler, so we must forward lines ourselves.
     logger.info('IPC: policies:create — spawning new process with full auth')
     const script = buildScript(policies, credentials, prefix, authMode, policyConfigs || {}, { useDeviceCode })
