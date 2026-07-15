@@ -2,7 +2,7 @@ const { spawn } = require('child_process')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const store = require('./store')
+const { store } = require('./store')
 const logger = require('./logger')
 
 function getPwshPath() {
