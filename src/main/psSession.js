@@ -58,12 +58,35 @@ class PersistentPsSession {
     }
     if (!this.proc) throw new Error('PowerShell not found. Please install PowerShell 7 from https://aka.ms/powershell')
 
+    // Buffer partial lines across data chunks. A single output line (e.g. the
+    // compressed policy JSON on a large tenant) can be far bigger than one
+    // 64 KB pipe chunk — splitting each chunk independently and trimming the
+    // fragment edges silently corrupted whitespace inside the JSON. Fragments
+    // are only emitted once their newline arrives; a short idle flush covers
+    // prompts (like device-code messages) that don't end with a newline.
+    // pwsh writes ANSI terminal-mode sequences to stdout between commands on
+    // Linux/macOS — strip them so they can't contaminate lines or markers.
+    const stripCtrl = (s) => s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/\x1b[()][AB]/g, '')
+    const emitLine = (raw) => {
+      const line = stripCtrl(raw).trim()
+      if (!line) return
+      if (!this._suppressUiOutput) sendToWin('ps:output', line)
+      for (const h of [...this.lineHandlers]) h(line)
+    }
+    this._stdoutBuf = ''
+    this._flushTimer = null
     this.proc.stdout.on('data', (data) => {
-      for (const raw of data.toString().split(/\r?\n/)) {
-        const line = raw.trim()
-        if (!line) continue
-        if (!this._suppressUiOutput) sendToWin('ps:output', line)
-        for (const h of [...this.lineHandlers]) h(line)
+      clearTimeout(this._flushTimer)
+      this._stdoutBuf += data.toString()
+      const parts = this._stdoutBuf.split(/\r?\n/)
+      this._stdoutBuf = parts.pop() // keep the incomplete tail
+      for (const raw of parts) emitLine(raw)
+      if (this._stdoutBuf) {
+        this._flushTimer = setTimeout(() => {
+          const tail = this._stdoutBuf
+          this._stdoutBuf = ''
+          emitLine(tail)
+        }, 300)
       }
     })
 
@@ -75,6 +98,8 @@ class PersistentPsSession {
     })
 
     this.proc.on('exit', () => {
+      clearTimeout(this._flushTimer)
+      if (this._stdoutBuf) { const tail = this._stdoutBuf; this._stdoutBuf = ''; emitLine(tail) }
       this.proc = null; this.context = null; this.lineHandlers = []
       this._ready = false; this._readyPromise = null
       sendToWin('session:disconnected')

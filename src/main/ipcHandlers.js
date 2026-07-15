@@ -1731,10 +1731,14 @@ function registerIpcHandlers(win) {
     try {
       const lines = []
       await psSession.run(
+        // @(...) + -InputObject forces a JSON array even for 0 or 1 policies —
+        // an empty pipeline piped to ConvertTo-Json emits NOTHING, which used
+        // to crash JSON.parse with "Unexpected end of JSON input" on tenants
+        // with no CA policies.
         `try {
-  $policies = Get-MgIdentityConditionalAccessPolicy -All
+  $policies = @(Get-MgIdentityConditionalAccessPolicy -All)
   Write-Output "POLICY_JSON_START"
-  $policies | ConvertTo-Json -Depth 10 -Compress
+  ConvertTo-Json -InputObject $policies -Depth 10 -Compress
   Write-Output "POLICY_JSON_END"
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
@@ -1744,9 +1748,17 @@ function registerIpcHandlers(win) {
       const startIdx = lines.indexOf('POLICY_JSON_START')
       const endIdx = lines.indexOf('POLICY_JSON_END')
       if (startIdx !== -1 && endIdx > startIdx) {
-        const json = lines.slice(startIdx + 1, endIdx).join('')
-        const parsed = JSON.parse(json)
-        return { policies: Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []), context: psSession.context }
+        const json = lines.slice(startIdx + 1, endIdx).join('').trim()
+        if (!json) return { policies: [], context: psSession.context }
+        let parsed
+        try {
+          parsed = JSON.parse(json)
+        } catch (parseErr) {
+          logger.error(`policies:list JSON parse failed (${json.length} chars): ${parseErr.message} — head: ${json.slice(0, 200)}`)
+          return { error: `Policy data from PowerShell could not be parsed (${parseErr.message}). Check the log file for details.` }
+        }
+        const arr = (Array.isArray(parsed) ? parsed : (parsed ? [parsed] : [])).filter(Boolean)
+        return { policies: arr, context: psSession.context }
       }
       const errLine = lines.find(l => l.startsWith('ERROR:'))
       if (errLine) return { error: errLine.slice(6).trim() }
@@ -2086,11 +2098,11 @@ if (-not ($scopes -contains 'Policy.ReadWrite.ConditionalAccess')) {
       let inJsonBlock = false
       await psSession.run(
         `try {
-  $policies = Get-MgIdentityConditionalAccessPolicy -All
-  $count = @($policies).Count
+  $policies = @(Get-MgIdentityConditionalAccessPolicy -All)
+  $count = $policies.Count
   Write-Output "STATUS: Fetched $count policies from tenant"
   Write-Output "POLICY_JSON_START"
-  $policies | ConvertTo-Json -Depth 10 -Compress
+  ConvertTo-Json -InputObject $policies -Depth 10 -Compress
   Write-Output "POLICY_JSON_END"
   try {
     $org = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization?\`$select=displayName" -ErrorAction SilentlyContinue
@@ -2117,9 +2129,17 @@ if (-not ($scopes -contains 'Policy.ReadWrite.ConditionalAccess')) {
         if (errLine) return { error: errLine.slice(6).trim() }
         return { error: 'No data returned' }
       }
-      const json = lines.slice(startIdx + 1, endIdx).join('')
-      const parsed = JSON.parse(json)
-      const policies = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : [])
+      const json = lines.slice(startIdx + 1, endIdx).join('').trim()
+      let parsed = []
+      if (json) {
+        try {
+          parsed = JSON.parse(json)
+        } catch (parseErr) {
+          logger.error(`report:audit JSON parse failed (${json.length} chars): ${parseErr.message} — head: ${json.slice(0, 200)}`)
+          return { error: `Policy data from PowerShell could not be parsed (${parseErr.message}). Check the log file for details.` }
+        }
+      }
+      const policies = (Array.isArray(parsed) ? parsed : (parsed ? [parsed] : [])).filter(Boolean)
 
       // Extract tenant name from the combined response
       let tenantName = null
