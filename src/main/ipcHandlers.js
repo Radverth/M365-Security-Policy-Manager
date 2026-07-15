@@ -85,7 +85,7 @@ function recSection(recommendations, esc, date) {
 </div>`
 }
 
-function generateReportHtml(orgName, policies, date, nameMap = {}, recommendations = [], licenses = null) {
+function generateReportHtml(orgName, policies, date, nameMap = {}, recommendations = [], licenses = null, docTitle = 'M365 Security Policy Report') {
   function esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
   function pick(...keys) { return obj => { for (const k of keys) { if (obj?.[k] != null) return obj[k] } return null } }
   const pv = (obj, ...keys) => { for (const k of keys) { if (obj?.[k] != null) return obj[k] } return null }
@@ -376,7 +376,7 @@ p { margin: 0; }
         </div>
         <div style="flex:1;border-bottom:1px solid rgba(255,255,255,0.1);margin-bottom:5px"></div>
         <div style="text-align:right">
-          <div style="font-size:9px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:rgba(255,255,255,0.35);margin-bottom:8px">M365 Security Policy Report</div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:rgba(255,255,255,0.35);margin-bottom:8px">${esc(docTitle)}</div>
           <div style="font-size:24px;font-weight:600;color:#fff;line-height:1.2;margin-bottom:6px">${esc(orgName || 'Tenant Report')}</div>
           <div style="font-size:12px;color:rgba(255,255,255,0.5)">Generated ${esc(date)}</div>
         </div>
@@ -1950,36 +1950,192 @@ try {
   // ── Backup / Restore ──────────────────────────────────────────────────────
   const getBackupDir = () => path.join(app.getPath('userData'), 'policy-backups')
 
+  // Writes a backup JSON into the app's internal backup dir (restorable via the
+  // Backups modal) and prunes old ones. Shared by backup:create and backup:export.
+  const writeInternalBackup = ({ policies: pols, tenantId, account, trigger }) => {
+    const dir = getBackupDir()
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    const ts = new Date().toISOString()
+    const filename = `backup-${ts.replace(/[:.]/g, '-')}-${trigger}.json`
+    const filepath = path.join(dir, filename)
+    const data = {
+      version: 1,
+      timestamp: ts,
+      tenantId: tenantId || 'unknown',
+      account: account || 'unknown',
+      trigger,
+      policyCount: Array.isArray(pols) ? pols.length : 0,
+      policies: Array.isArray(pols) ? pols : [],
+    }
+    fs.writeFileSync(filepath, JSON.stringify(data, null, 2), 'utf-8')
+    logger.info(`backup write trigger=${trigger} count=${data.policyCount} file=${filename}`)
+    // Prune oldest backups, keep last 50
+    try {
+      const files = fs.readdirSync(dir).filter(f => f.endsWith('.json')).sort()
+      if (files.length > 50) {
+        files.slice(0, files.length - 50).forEach(f => {
+          try { fs.unlinkSync(path.join(dir, f)) } catch {}
+        })
+      }
+    } catch {}
+    return { success: true, filename, timestamp: ts }
+  }
+
   ipcMain.handle('backup:create', async (_, { policies: pols, tenantId, account, trigger }) => {
     try {
-      const dir = getBackupDir()
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-      const ts = new Date().toISOString()
-      const filename = `backup-${ts.replace(/[:.]/g, '-')}-${trigger}.json`
-      const filepath = path.join(dir, filename)
-      const data = {
+      return writeInternalBackup({ policies: pols, tenantId, account, trigger })
+    } catch (err) {
+      logger.error('backup:create error: ' + err.message)
+      return { success: false, error: err.message }
+    }
+  })
+
+  // One-click full backup to disk: the user picks a folder once, then a
+  // timestamped backup folder is created containing a single restorable JSON
+  // manifest, one JSON file per policy, a fully-detailed PDF, and a README.
+  // The same snapshot is also registered in the internal backup list.
+  ipcMain.handle('backup:export', async (_, { policies: pols, tenantId, account, orgName, nameMap = {} } = {}) => {
+    try {
+      const policies = (Array.isArray(pols) ? pols : []).filter(Boolean)
+      if (policies.length === 0) {
+        return { success: false, error: 'No policies to back up — load policies from a tenant first' }
+      }
+
+      // Best-effort tenant display name for the folder name and PDF header
+      let tenant = orgName || null
+      if (!tenant && psSession.alive) {
+        try {
+          const lines = []
+          await psSession.run(
+            `try {
+  $org = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization?\`$select=displayName" -ErrorAction Stop
+  if ($org -and $org.value -and $org.value.Count -gt 0) { Write-Output "TENANT_NAME:$($org.value[0].displayName)" }
+} catch {}`,
+            (line) => lines.push(line),
+            30000
+          )
+          const nameLine = lines.find(l => l.startsWith('TENANT_NAME:'))
+          if (nameLine) tenant = nameLine.slice('TENANT_NAME:'.length).trim()
+        } catch { /* name is cosmetic — fall through */ }
+      }
+      if (!tenant) tenant = account || tenantId || 'Tenant'
+
+      const { filePaths, canceled } = await dialog.showOpenDialog(_win, {
+        title: 'Choose where to save the policy backup',
+        buttonLabel: 'Save Backup Here',
+        defaultPath: app.getPath('documents'),
+        properties: ['openDirectory', 'createDirectory'],
+      })
+      if (canceled || !filePaths?.length) return { cancelled: true }
+
+      const now = new Date()
+      const ts = now.toISOString()
+      const stamp = ts.slice(0, 19).replace(/[:T]/g, '-') // e.g. 2026-07-15-14-30-00
+      const safeName = s => String(s || '')
+        .replace(/[^a-zA-Z0-9 \-_.]/g, '')
+        .trim()
+        .replace(/\s+/g, '_')
+        .slice(0, 60) || 'unnamed'
+      const folder = path.join(filePaths[0], `PolicyBackup_${safeName(tenant)}_${stamp}`)
+      fs.mkdirSync(path.join(folder, 'policies'), { recursive: true })
+
+      // 1. Single restorable JSON manifest with everything in it
+      const manifest = {
         version: 1,
         timestamp: ts,
         tenantId: tenantId || 'unknown',
         account: account || 'unknown',
-        trigger,
-        policyCount: Array.isArray(pols) ? pols.length : 0,
-        policies: Array.isArray(pols) ? pols : [],
+        tenantName: tenant,
+        trigger: 'manual',
+        policyCount: policies.length,
+        policies,
       }
-      fs.writeFileSync(filepath, JSON.stringify(data, null, 2), 'utf-8')
-      logger.info(`backup:create trigger=${trigger} count=${data.policyCount} file=${filename}`)
-      // Prune oldest backups, keep last 50
+      fs.writeFileSync(path.join(folder, 'policies-backup.json'), JSON.stringify(manifest, null, 2), 'utf-8')
+
+      // 2. One JSON file per policy (named after the policy, de-duplicated)
+      const usedNames = new Set()
+      for (const p of policies) {
+        const base = safeName(p.DisplayName || p.displayName || p.Id || p.id || 'policy')
+        let name = base, n = 2
+        while (usedNames.has(name.toLowerCase())) name = `${base}_${n++}`
+        usedNames.add(name.toLowerCase())
+        fs.writeFileSync(path.join(folder, 'policies', `${name}.json`), JSON.stringify(p, null, 2), 'utf-8')
+      }
+
+      // 3. PDF with the full configuration of every policy
+      const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })
+      const html = generateReportHtml(tenant, policies, dateStr, nameMap || {}, [], null, 'M365 Policy Backup')
+      const pdfPath = path.join(folder, `PolicyBackup_${safeName(tenant)}_${stamp}.pdf`)
+      const tmpPath = path.join(app.getPath('temp'), `_policy_backup_${Date.now()}.html`)
+      const printWin = new BrowserWindow({
+        show: false,
+        width: 1200,
+        height: 900,
+        webPreferences: { nodeIntegration: false, contextIsolation: true },
+      })
       try {
-        const files = fs.readdirSync(dir).filter(f => f.endsWith('.json')).sort()
-        if (files.length > 50) {
-          files.slice(0, files.length - 50).forEach(f => {
-            try { fs.unlinkSync(path.join(dir, f)) } catch {}
-          })
-        }
-      } catch {}
-      return { success: true, filename, timestamp: ts }
+        fs.writeFileSync(tmpPath, html, 'utf-8')
+        await printWin.loadFile(tmpPath)
+        const buffer = await printWin.webContents.printToPDF({
+          printBackground: true,
+          pageSize: 'A4',
+          margins: { marginType: 'printableArea' },
+        })
+        fs.writeFileSync(pdfPath, buffer)
+      } finally {
+        printWin.destroy()
+        try { fs.unlinkSync(tmpPath) } catch {}
+      }
+
+      // 4. README explaining the contents and how to restore
+      const readme = `M365 Security Policy Manager — Policy Backup
+=============================================
+
+Tenant:    ${tenant}${tenantId ? ` (${tenantId})` : ''}
+Account:   ${account || 'unknown'}
+Created:   ${now.toLocaleString()}
+Policies:  ${policies.length}
+
+Contents
+--------
+policies-backup.json    Complete backup of all ${policies.length} Conditional Access
+                        policies in a single file (raw data as returned by
+                        Microsoft Graph). This is the file used for restores.
+policies/               One JSON file per policy — useful for diffing,
+                        version control, or inspecting a single policy.
+PolicyBackup_*.pdf      Human-readable report with the full configuration of
+                        every policy: state, users, applications, platforms,
+                        locations, client apps, risk levels, grant & session
+                        controls, exclusions, and created/modified dates.
+
+Restoring
+---------
+This backup was also saved to the app's internal backup list when it was
+created (shown with a "Manual" badge). To restore:
+  1. Open M365 Security Policy Manager and connect to the tenant.
+  2. Go to Manage Policies -> Backups.
+  3. Select this backup, tick the policies you need, and click
+     "Restore Selected".
+Restored policies are created as new copies (original policy IDs are not
+preserved).
+
+Generated by M365 Security Policy Manager v${app.getVersion()}
+`
+      fs.writeFileSync(path.join(folder, 'README.txt'), readme, 'utf-8')
+
+      // 5. Register the same snapshot in the internal (restorable) backup list
+      let internal = null
+      try {
+        internal = writeInternalBackup({ policies, tenantId, account, trigger: 'manual' })
+      } catch (err) {
+        logger.warn('backup:export internal backup failed: ' + err.message)
+      }
+
+      logger.info(`backup:export count=${policies.length} folder=${folder}`)
+      await shell.openPath(folder)
+      return { success: true, folder, policyCount: policies.length, timestamp: internal?.timestamp || ts }
     } catch (err) {
-      logger.error('backup:create error: ' + err.message)
+      logger.error('backup:export error: ' + err.message)
       return { success: false, error: err.message }
     }
   })

@@ -323,6 +323,7 @@ function BackupRestoreModal({ open, onClose }) {
         <div className="space-y-3 pt-1">
           <p className="text-xs text-gray-500">
             Backups are created automatically before edits, deletions, and when policies are first loaded from a tenant.
+            Use <strong>Backup Now</strong> to also export a full copy (JSON + PDF) to a folder of your choice.
           </p>
 
           {loadingList ? (
@@ -709,6 +710,7 @@ export default function ManagePolicies() {
   const [lastBackup, setLastBackup] = useState(null)
   const [backupCount, setBackupCount] = useState(0)
   const [showBackups, setShowBackups] = useState(false)
+  const [exporting, setExporting] = useState(false)
   // Effective connection: prefer local connectedAs, fall back to global session
   const effectiveSession = connectedAs || tenantSession
 
@@ -739,6 +741,51 @@ export default function ManagePolicies() {
         setBackupCount(c => c + 1)
       }
     } catch {}
+  }
+
+  // One-click full backup to disk: JSON manifest + per-policy JSON files + PDF.
+  // Loads policies from the tenant first if the table hasn't been populated yet.
+  const handleExportBackup = async () => {
+    if (!window.api?.backup?.export) return
+    setExporting(true)
+    try {
+      let pols = policies
+      let session = connectedAs || tenantSession
+      if (pols.length === 0) {
+        const result = await window.api.policies.list()
+        if (result?.error) {
+          addNotification('Could not load policies: ' + result.error, 'error')
+          return
+        }
+        pols = Array.isArray(result?.policies) ? result.policies : []
+        if (result?.context) {
+          setConnectedAs(result.context)
+          session = result.context
+        }
+        setPolicies(pols)
+        if (pols.length === 0) {
+          addNotification('No policies found in this tenant to back up', 'error')
+          return
+        }
+      }
+      const result = await window.api.backup.export({
+        policies: pols,
+        tenantId: session?.TenantId,
+        account: session?.Account,
+      })
+      if (result?.cancelled) return
+      if (result?.success) {
+        addNotification(`Backed up ${result.policyCount} polic${result.policyCount === 1 ? 'y' : 'ies'} (JSON + PDF) to ${result.folder}`, 'success')
+        setLastBackup({ timestamp: result.timestamp, trigger: 'manual', policyCount: pols.length })
+        setBackupCount(c => c + 1)
+      } else {
+        addNotification('Backup failed: ' + (result?.error || 'Unknown error'), 'error')
+      }
+    } catch (err) {
+      addNotification('Backup failed: ' + err.message, 'error')
+    } finally {
+      setExporting(false)
+    }
   }
 
   const handleLoad = async () => {
@@ -950,9 +997,17 @@ export default function ManagePolicies() {
                   )}
                 </div>
               </div>
-              <Button size="sm" variant="secondary" onClick={() => setShowBackups(true)}>
-                View Backups
-              </Button>
+              <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+                <Button size="sm" variant="secondary" onClick={() => setShowBackups(true)}>
+                  View Backups
+                </Button>
+                <Button size="sm" variant="primary" onClick={handleExportBackup} loading={exporting}>
+                  <svg className="w-3.5 h-3.5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0 0l-4-4m4 4l4-4" />
+                  </svg>
+                  Backup Now (JSON + PDF)
+                </Button>
+              </div>
             </div>
           )}
 
@@ -1003,6 +1058,12 @@ export default function ManagePolicies() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
               </svg>
               Backups
+            </Button>
+            <Button size="sm" variant="secondary" onClick={handleExportBackup} loading={exporting}>
+              <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0 0l-4-4m4 4l4-4" />
+              </svg>
+              Backup Now
             </Button>
             <Button size="sm" variant="secondary" onClick={handleLoad} loading={loading}>
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
