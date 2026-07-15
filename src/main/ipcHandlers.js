@@ -1581,14 +1581,35 @@ function registerIpcHandlers(win) {
   // A PowerShell session that already loaded the old module assemblies can never
   // load the new ones (.NET cannot unload assemblies) — every Graph call after a
   // module change fails with "Assembly with same name is already loaded". Kill
-  // the persistent session so the next connect starts a clean process.
+  // the persistent session and bring a fresh one up, silently reconnecting the
+  // tenant with the cached sign-in token so the user doesn't have to.
+  // The restart runs in the background: session bootstrap takes 30-60s on
+  // PowerShell 5 and the module install/update IPC must not block on it.
   const restartSessionAfterModuleChange = (logs) => {
     if (!psSession.alive) return
-    logger.info('modules changed — closing persistent PS session to avoid stale assemblies')
+    const hadTenant = !!psSession.context
+    logger.info('modules changed — restarting persistent PS session to avoid stale assemblies')
     psSession.kill()
-    const msg = 'INFO: PowerShell session closed so the new module versions load cleanly - reconnect your tenant before deploying'
+    const msg = 'INFO: Restarting PowerShell session so the new module versions load cleanly...'
     logs.push(msg)
     safeSend('ps:output', msg)
+    ;(async () => {
+      await psSession.start(_win)
+      if (!hadTenant) return
+      const ctx = await psSession.connectSilent()
+      if (ctx) {
+        let licenses = null
+        try { licenses = await checkTenantLicenses() } catch {}
+        safeSend('session:reconnected', { context: ctx, licenses })
+        safeSend('ps:output', `CONNECTED: Reconnected as ${ctx.Account} — session ready with the updated modules`)
+        logger.info(`session auto-reconnected after module change as ${ctx.Account}`)
+      } else {
+        safeSend('ps:output', 'INFO: Could not reconnect with the cached sign-in - use Connect Tenant to sign in again')
+      }
+    })().catch((err) => {
+      logger.warn(`session restart after module change failed: ${err.message}`)
+      safeSend('ps:output', 'INFO: PowerShell session closed - reconnect your tenant before deploying')
+    })
   }
 
   // Module install
