@@ -370,6 +370,20 @@ describe('EX004 - Anti-Spam Inbound Policy', () => {
     expect(s).toContain('Get-HostedContentFilterPolicy')
     expect(s).toContain('Set-HostedContentFilterPolicy')
   })
+  test('SPF hard fail uses the SpamFilteringOption enum, not a boolean', () => {
+    const s = script1('EX004', EX, 'Anti-Spam Inbound')
+    expect(s).toContain("MarkAsSpamSpfRecordHardFail = 'On'")
+    expect(s).not.toContain('MarkAsSpamSpfRecordHardFail = $true')
+  })
+})
+
+describe('EX009 - Safe Links Policy', () => {
+  test('does not pass the removed IsEnabled parameter', () => {
+    const s = script1('EX009', EX, 'Safe Links')
+    expect(s).toContain('New-SafeLinksPolicy')
+    expect(s).not.toContain('IsEnabled')
+    expect(s).toContain('EnableSafeLinksForEmail = $true')
+  })
 })
 
 describe('EX008 - Safe Attachments Policy', () => {

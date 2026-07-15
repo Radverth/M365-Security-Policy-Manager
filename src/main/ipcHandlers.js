@@ -1581,14 +1581,35 @@ function registerIpcHandlers(win) {
   // A PowerShell session that already loaded the old module assemblies can never
   // load the new ones (.NET cannot unload assemblies) — every Graph call after a
   // module change fails with "Assembly with same name is already loaded". Kill
-  // the persistent session so the next connect starts a clean process.
+  // the persistent session and bring a fresh one up, silently reconnecting the
+  // tenant with the cached sign-in token so the user doesn't have to.
+  // The restart runs in the background: session bootstrap takes 30-60s on
+  // PowerShell 5 and the module install/update IPC must not block on it.
   const restartSessionAfterModuleChange = (logs) => {
     if (!psSession.alive) return
-    logger.info('modules changed — closing persistent PS session to avoid stale assemblies')
+    const hadTenant = !!psSession.context
+    logger.info('modules changed — restarting persistent PS session to avoid stale assemblies')
     psSession.kill()
-    const msg = 'INFO: PowerShell session closed so the new module versions load cleanly - reconnect your tenant before deploying'
+    const msg = 'INFO: Restarting PowerShell session so the new module versions load cleanly...'
     logs.push(msg)
     safeSend('ps:output', msg)
+    ;(async () => {
+      await psSession.start(_win)
+      if (!hadTenant) return
+      const ctx = await psSession.connectSilent()
+      if (ctx) {
+        let licenses = null
+        try { licenses = await checkTenantLicenses() } catch {}
+        safeSend('session:reconnected', { context: ctx, licenses })
+        safeSend('ps:output', `CONNECTED: Reconnected as ${ctx.Account} — session ready with the updated modules`)
+        logger.info(`session auto-reconnected after module change as ${ctx.Account}`)
+      } else {
+        safeSend('ps:output', 'INFO: Could not reconnect with the cached sign-in - use Connect Tenant to sign in again')
+      }
+    })().catch((err) => {
+      logger.warn(`session restart after module change failed: ${err.message}`)
+      safeSend('ps:output', 'INFO: PowerShell session closed - reconnect your tenant before deploying')
+    })
   }
 
   // Module install
@@ -1826,8 +1847,21 @@ function registerIpcHandlers(win) {
       }
     }
 
-    if (psSession.alive && !hasExo && !hasIpps) {
-      logger.info('IPC: policies:create — using persistent session (no re-auth)')
+    if (psSession.alive) {
+      // One sign-in per tenant: EXO/IPPS connect INSIDE the persistent session
+      // (first time only — subsequent deploys reuse the connection). Their
+      // device-code/output lines stream via the session's global handler.
+      logger.info(`IPC: policies:create — using persistent session${hasExo || hasIpps ? ' (EXO/IPPS in-session)' : ' (no re-auth)'}`)
+      try {
+        if (hasExo) await psSession.connectExo()
+        if (hasIpps) await psSession.connectIpps()
+      } catch (err) {
+        logger.warn(`policies:create — in-session connect failed: ${err.message}`)
+        const msg = `ERROR: ${err.message}`
+        logs.push(msg)
+        _win.webContents.send('ps:error', msg)
+        return { logs, results }
+      }
       _win.webContents.send('ps:output', 'CONNECTED: Using active tenant session — deploying policies...')
       const script = buildPoliciesScript(policies, prefix || '', policyConfigs || {})
       await psSession.run(script, parseResult, 300000)
@@ -1835,7 +1869,7 @@ function registerIpcHandlers(win) {
       return { logs, results }
     }
 
-    // Fall back to a new process with full auth (EXO/IPPS policies, or no session).
+    // Fall back to a new process with full auth (no persistent session at all).
     // This spawns a fresh pwsh with no global handler, so we must forward lines ourselves.
     logger.info('IPC: policies:create — spawning new process with full auth')
     const script = buildScript(policies, credentials, prefix, authMode, policyConfigs || {}, { useDeviceCode })

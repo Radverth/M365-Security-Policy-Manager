@@ -143,4 +143,11 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('session:disconnected', h)
     return () => ipcRenderer.removeListener('session:disconnected', h)
   },
+
+  // Session auto-reconnected (e.g. after a module update restarts the session)
+  onSessionReconnected: (cb) => {
+    const h = (_, data) => cb(data)
+    ipcRenderer.on('session:reconnected', h)
+    return () => ipcRenderer.removeListener('session:reconnected', h)
+  },
 })

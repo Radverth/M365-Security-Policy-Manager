@@ -707,7 +707,7 @@ function SigningOutOverlay() {
 }
 
 export default function App() {
-  const { modules, psStatus, loadModules, loadSettings, checkFirstRun, initUpdaterListeners, appendLog, checkExistingSession, clearTenantSession } = useStore()
+  const { modules, psStatus, loadModules, loadSettings, checkFirstRun, initUpdaterListeners, appendLog, checkExistingSession, clearTenantSession, setTenantSession, setTenantLicenses } = useStore()
   const [signingOut, setSigningOut] = useState(false)
 
   useEffect(() => {
@@ -721,11 +721,16 @@ export default function App() {
       const unsubOut = window.api.onPsOutput((line) => appendLog(line, 'output'))
       const unsubErr = window.api.onPsError((line) => appendLog(line, 'error'))
       const unsubDisc = window.api.onSessionDisconnected?.(() => clearTenantSession())
+      const unsubReconn = window.api.onSessionReconnected?.(({ context, licenses }) => {
+        setTenantSession(context)
+        if (licenses) setTenantLicenses(licenses)
+      })
       const unsubQuit = window.api.app?.onDisconnecting?.(() => setSigningOut(true))
       return () => {
         unsubOut?.()
         unsubErr?.()
         unsubDisc?.()
+        unsubReconn?.()
         unsubQuit?.()
       }
     }
