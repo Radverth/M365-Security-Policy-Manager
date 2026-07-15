@@ -166,6 +166,8 @@ try {
 } catch {
     $errMsg = $_.Exception.Message
     if ($errMsg -match 'listener') {${verifyBlock}
+    } elseif ($errMsg -match 'Assembly with same name is already loaded') {
+        Write-Output "ERROR: A different version of the Microsoft Graph modules is already loaded. Restart the app and close any other PowerShell windows, then try again. If it persists, update all Graph modules to the same version on the Modules page."; exit 1
     } else {
         Write-Output "ERROR: Graph connect failed - $errMsg"; exit 1
     }
