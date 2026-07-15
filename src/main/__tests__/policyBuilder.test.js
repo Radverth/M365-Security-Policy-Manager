@@ -813,6 +813,17 @@ describe('buildScript - EXO connection', () => {
     const s = buildScript([pol('CA001', CA, 'MFA')], null, '', 'interactive', {})
     expect(s).not.toContain('Connect-ExchangeOnline')
   })
+  test('-Device is guarded by a PowerShell 7 version check (unsupported on 5.1)', () => {
+    const s = buildScript([pol('EX001', EX, 'DKIM')], null, '', 'interactive', {})
+    expect(s).toContain('Connect-ExchangeOnline -Device')
+    expect(s).toContain('$PSVersionTable.PSVersion.Major -ge 7')
+    expect(s).toContain('Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop')
+  })
+  test('aborts the run when the EXO connection fails', () => {
+    const s = buildScript([pol('EX001', EX, 'DKIM')], null, '', 'interactive', {})
+    const catchBlock = s.split('ERROR: EXO connect failed')[1]
+    expect(catchBlock).toContain('exit 1')
+  })
 })
 
 describe('buildScript - IPPS connection', () => {
@@ -823,6 +834,17 @@ describe('buildScript - IPPS connection', () => {
   test('no IPPS for CA-only policies', () => {
     const s = buildScript([pol('CA001', CA, 'MFA')], null, '', 'interactive', {})
     expect(s).not.toContain('Connect-IPPSSession')
+  })
+  test('-Device is guarded by a PowerShell 7 version check (unsupported on 5.1)', () => {
+    const s = buildScript([pol('AC007', AC, 'DLP')], null, '', 'interactive', {})
+    expect(s).toContain('Connect-IPPSSession -Device')
+    expect(s).toContain('$PSVersionTable.PSVersion.Major -ge 7')
+    expect(s).toContain('Connect-IPPSSession -ShowBanner:$false -ErrorAction Stop')
+  })
+  test('aborts the run when the IPPS connection fails', () => {
+    const s = buildScript([pol('AC007', AC, 'DLP')], null, '', 'interactive', {})
+    const catchBlock = s.split('ERROR: IPPS connect failed')[1]
+    expect(catchBlock).toContain('exit 1')
   })
 })
 

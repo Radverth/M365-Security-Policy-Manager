@@ -1676,7 +1676,8 @@ function registerIpcHandlers(win) {
       const formats = {
         json: { name: 'JSON report', ext: 'json', content: () => JSON.stringify(report, null, 2) },
         md:   { name: 'Markdown report', ext: 'md', content: () => reportToMarkdown(report) },
-        ps1:  { name: 'PowerShell script', ext: 'ps1', content: () => report.fullScript || '' },
+        // BOM keeps Windows PowerShell 5.1 from reading the exported script as ANSI
+        ps1:  { name: 'PowerShell script', ext: 'ps1', content: () => '\ufeff' + (report.fullScript || '') },
       }
       const f = formats[format]
       if (!f) return { error: `Unknown export format: ${format}` }

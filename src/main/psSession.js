@@ -155,7 +155,8 @@ if ($PSVersionTable.PSVersion.Major -ge 7) {
       this.lineHandlers.push(handler)
       timer = setTimeout(() => { cleanup(); reject(new Error('PowerShell command timed out')) }, timeoutMs)
       try {
-        fs.writeFileSync(tmpFile, script + '\n', 'utf-8')
+        // BOM required — Windows PowerShell 5.1 reads BOM-less .ps1 files as ANSI
+        fs.writeFileSync(tmpFile, '\ufeff' + script + '\n', 'utf-8')
         this.proc.stdin.write(`& '${tmpFile.replace(/'/g, "''")}'\nWrite-Output "${marker}"\n`)
       } catch (err) { cleanup(); reject(err) }
     })
