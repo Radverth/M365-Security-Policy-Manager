@@ -220,13 +220,20 @@ foreach ($mod in $modules) {
         Write-Output "SUCCESS: $mod updated"
         # Update-Module installs side-by-side and never removes old versions,
         # which silently accumulate — clean up everything but the newest.
+        # A failed removal must be surfaced: leftover old versions are what
+        # cause "Assembly with same name is already loaded" errors later.
         try {
             Get-InstalledModule -Name $mod -AllVersions -ErrorAction Stop |
                 Sort-Object { [version]$_.Version } -Descending |
                 Select-Object -Skip 1 |
                 ForEach-Object {
                     Write-Output "CLEANUP: Removing $mod $($_.Version)..."
-                    Uninstall-Module -Name $mod -RequiredVersion $_.Version -Force -ErrorAction SilentlyContinue
+                    try {
+                        Uninstall-Module -Name $mod -RequiredVersion $_.Version -Force -ErrorAction Stop
+                    } catch {
+                        Write-Output "WARNING: Could not remove $mod $($_.Version) - $($_.Exception.Message)"
+                        Write-Output "WARNING: The old version is likely loaded by another PowerShell process - close other PowerShell windows, restart this app and update again"
+                    }
                 }
         } catch {}
     }

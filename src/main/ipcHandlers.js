@@ -1578,6 +1578,19 @@ function registerIpcHandlers(win) {
     if (_win && !_win.isDestroyed()) _win.webContents.send(channel, line)
   }
 
+  // A PowerShell session that already loaded the old module assemblies can never
+  // load the new ones (.NET cannot unload assemblies) — every Graph call after a
+  // module change fails with "Assembly with same name is already loaded". Kill
+  // the persistent session so the next connect starts a clean process.
+  const restartSessionAfterModuleChange = (logs) => {
+    if (!psSession.alive) return
+    logger.info('modules changed — closing persistent PS session to avoid stale assemblies')
+    psSession.kill()
+    const msg = 'INFO: PowerShell session closed so the new module versions load cleanly - reconnect your tenant before deploying'
+    logs.push(msg)
+    safeSend('ps:output', msg)
+  }
+
   // Module install
   ipcMain.handle('modules:install', async (_, moduleNames) => {
     logger.info(`IPC: modules:install [${moduleNames.join(', ')}]`)
@@ -1594,6 +1607,7 @@ function registerIpcHandlers(win) {
       }
     )
     if (exitCode !== 0) logs.push(`ERROR: PowerShell exited with code ${exitCode}`)
+    restartSessionAfterModuleChange(logs)
     return logs
   })
 
@@ -1613,6 +1627,7 @@ function registerIpcHandlers(win) {
       }
     )
     if (exitCode !== 0) logs.push(`ERROR: PowerShell exited with code ${exitCode}`)
+    restartSessionAfterModuleChange(logs)
     return logs
   })
 

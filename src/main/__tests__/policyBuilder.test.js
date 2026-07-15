@@ -866,6 +866,11 @@ describe('buildScript - interactive auth', () => {
     expect(s).toContain('Connect-MgGraph')
     expect(s).toContain('UseDeviceAuthentication')
   })
+  test('explains the mixed-module-version assembly conflict instead of the raw error', () => {
+    const s = buildScript([pol('CA001', CA, 'MFA')], null, '', 'interactive', {})
+    expect(s).toContain("Assembly with same name is already loaded")
+    expect(s).toContain('A different version of the Microsoft Graph modules is already loaded')
+  })
 })
 
 describe('buildScript - multiple policies', () => {

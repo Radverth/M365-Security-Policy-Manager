@@ -226,7 +226,12 @@ try {
     Write-Output "ERROR: Could not retrieve context after authentication"
   }
 } catch {
-  Write-Output "ERROR: $($_.Exception.Message)"
+  $errMsg = $_.Exception.Message
+  if ($errMsg -match 'Assembly with same name is already loaded') {
+    Write-Output "ERROR: A different version of the Microsoft Graph modules is already loaded in this PowerShell session. Restart the app and close any other PowerShell windows, then try again. If it persists, open the Modules page and update all Graph modules to the same version."
+  } else {
+    Write-Output "ERROR: $errMsg"
+  }
 }
 `, null, 180000)
     const errLine = output.split('\n').find(l => l.trim().startsWith('ERROR:'))
