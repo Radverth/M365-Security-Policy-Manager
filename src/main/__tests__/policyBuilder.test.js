@@ -392,7 +392,13 @@ describe('EX004 - Anti-Spam Inbound Policy', () => {
   })
   test('creates the rule even when the policy already exists (heals orphaned policies)', () => {
     const s = script1('EX004', EX, 'Anti-Spam Inbound')
-    expect(s).toContain('if (-not (Get-HostedContentFilterRule -Identity $pn -ErrorAction SilentlyContinue))')
+    expect(s).toContain('Get-HostedContentFilterRule -ErrorAction SilentlyContinue')
+    expect(s).toContain('New-HostedContentFilterRule')
+  })
+  test('adopts an existing policy created under a different prefix (matches by policy ID)', () => {
+    const s = script1('EX004', EX, 'Anti-Spam Inbound')
+    expect(s).toContain("$_.Name -like '*EX004:*'")
+    expect(s).toContain('$pn = $_existing.Name')
   })
   test('SPF hard fail uses the SpamFilteringOption enum, not a boolean', () => {
     const s = script1('EX004', EX, 'Anti-Spam Inbound')
@@ -410,8 +416,13 @@ describe('EX009 - Safe Links Policy', () => {
   })
   test('creates the rule even when the policy already exists (heals orphaned policies)', () => {
     const s = script1('EX009', EX, 'Safe Links')
-    expect(s).toContain('if (-not (Get-SafeLinksRule -Identity $pn -ErrorAction SilentlyContinue))')
+    expect(s).toContain('Get-SafeLinksRule -ErrorAction SilentlyContinue')
     expect(s).toContain('New-SafeLinksRule')
+  })
+  test('adopts an existing policy created under a different prefix (matches by policy ID)', () => {
+    const s = script1('EX009', EX, 'Safe Links')
+    expect(s).toContain("$_.Name -like '*EX009:*'")
+    expect(s).toContain('$pn = $_existing.Name')
   })
 })
 
@@ -427,7 +438,11 @@ describe('EX008 - Safe Attachments Policy', () => {
     expect(s).toContain('Get-AcceptedDomain')
   })
   test('creates the rule even when the policy already exists (heals orphaned policies)', () => {
-    expect(s).toContain('if (-not (Get-SafeAttachmentRule -Identity $pn -ErrorAction SilentlyContinue))')
+    expect(s).toContain('Get-SafeAttachmentRule -ErrorAction SilentlyContinue')
+  })
+  test('adopts an existing policy created under a different prefix (matches by policy ID)', () => {
+    expect(s).toContain("$_.Name -like '*EX008:*'")
+    expect(s).toContain('$pn = $_existing.Name')
   })
   test('sets action to Block', () => {
     expect(s).toContain("Action = 'Block'")
@@ -437,8 +452,13 @@ describe('EX008 - Safe Attachments Policy', () => {
 describe('EX010 - Anti-Phishing Policy', () => {
   test('creates the rule even when the policy already exists (heals orphaned policies)', () => {
     const s = script1('EX010', EX, 'Anti-Phishing')
-    expect(s).toContain('if (-not (Get-AntiPhishRule -Identity $pn -ErrorAction SilentlyContinue))')
+    expect(s).toContain('Get-AntiPhishRule -ErrorAction SilentlyContinue')
     expect(s).toContain('New-AntiPhishRule')
+  })
+  test('adopts an existing policy created under a different prefix (matches by policy ID)', () => {
+    const s = script1('EX010', EX, 'Anti-Phishing')
+    expect(s).toContain("$_.Name -like '*EX010:*'")
+    expect(s).toContain('$pn = $_existing.Name')
   })
 })
 

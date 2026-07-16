@@ -634,6 +634,27 @@ if ($_r.state -ne '${state}') { Write-Output "  WARNING: state was not applied �
 
 // ─── Exchange Online ──────────────────────────────────────────────────────────
 
+// Upsert for the named EOP policy types (anti-spam, Safe Attachments, Safe
+// Links, anti-phish). Expects $pn (target name) and $p (settings splat) to be
+// set. Matches an existing policy by exact name OR by the embedded policy ID,
+// so a policy created under a different prefix is updated instead of ignored —
+// these policy types cannot be renamed once created (Set-* has no -Name), so
+// the existing name is kept. Also guarantees the recipient rule exists: the
+// Defender portal doesn't display a policy that has no rule.
+function eopUpsert(id, noun) {
+  return `$_existing = @(Get-${noun}Policy -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $pn -or $_.Name -like '*${id}:*' } | Sort-Object { $_.Name -ne $pn }) | Select-Object -First 1
+if ($_existing) {
+    $pn = $_existing.Name
+    Set-${noun}Policy -Identity $pn @p
+    Write-Output "  Updated existing policy: $pn"
+} else {
+    New-${noun}Policy -Name $pn @p | Out-Null
+}
+if (-not @(Get-${noun}Rule -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $pn -or "$($_.${noun}Policy)" -eq $pn })) {
+    New-${noun}Rule -Name $pn -${noun}Policy $pn -RecipientDomainIs (Get-AcceptedDomain).DomainName | Out-Null
+}`
+}
+
 function buildEXScript(policy, config, prefix) {
   const displayName = dn(policy, prefix)
   const enabled = (config.state || 'enabled') === 'enabled'
@@ -659,14 +680,7 @@ function buildEXScript(policy, config, prefix) {
       return policyBlock(policy.id, policy.name,
         `$pn = ${psStr(displayName)}
 $p = @{ SpamAction = '${safe(spam)}'; HighConfidenceSpamAction = '${safe(hcSpam)}'; PhishSpamAction = 'Quarantine'; HighConfidencePhishAction = 'Quarantine'; BulkThreshold = 6; MarkAsSpamSpfRecordHardFail = 'On'; EnableRegionBlockList = ${$e} }
-if (Get-HostedContentFilterPolicy -Identity $pn -ErrorAction SilentlyContinue) {
-    Set-HostedContentFilterPolicy -Identity $pn @p
-} else {
-    New-HostedContentFilterPolicy -Name $pn @p | Out-Null
-}
-if (-not (Get-HostedContentFilterRule -Identity $pn -ErrorAction SilentlyContinue)) {
-    New-HostedContentFilterRule -Name $pn -HostedContentFilterPolicy $pn -RecipientDomainIs (Get-AcceptedDomain).DomainName | Out-Null
-}`)
+${eopUpsert('EX004', 'HostedContentFilter')}`)
     }
 
     case 'EX005': return policyBlock(policy.id, policy.name,
@@ -683,26 +697,12 @@ Write-Output "  Outbound spam limits configured on Default policy"`)
     case 'EX008': return policyBlock(policy.id, policy.name,
       `$pn = ${psStr(displayName)}
 $p = @{ Enable = ${$e}; Action = 'Block'; Redirect = $false }
-if (Get-SafeAttachmentPolicy -Identity $pn -ErrorAction SilentlyContinue) {
-    Set-SafeAttachmentPolicy -Identity $pn @p
-} else {
-    New-SafeAttachmentPolicy -Name $pn @p | Out-Null
-}
-if (-not (Get-SafeAttachmentRule -Identity $pn -ErrorAction SilentlyContinue)) {
-    New-SafeAttachmentRule -Name $pn -SafeAttachmentPolicy $pn -RecipientDomainIs (Get-AcceptedDomain).DomainName | Out-Null
-}`)
+${eopUpsert('EX008', 'SafeAttachment')}`)
 
     case 'EX009': return policyBlock(policy.id, policy.name,
       `$pn = ${psStr(displayName)}
 $p = @{ EnableSafeLinksForEmail = ${$e}; EnableSafeLinksForTeams = ${$e}; EnableSafeLinksForOffice = ${$e}; AllowClickThrough = $false; TrackClicks = $true; ScanUrls = $true; DeliverMessageAfterScan = $true }
-if (Get-SafeLinksPolicy -Identity $pn -ErrorAction SilentlyContinue) {
-    Set-SafeLinksPolicy -Identity $pn @p
-} else {
-    New-SafeLinksPolicy -Name $pn @p | Out-Null
-}
-if (-not (Get-SafeLinksRule -Identity $pn -ErrorAction SilentlyContinue)) {
-    New-SafeLinksRule -Name $pn -SafeLinksPolicy $pn -RecipientDomainIs (Get-AcceptedDomain).DomainName | Out-Null
-}`)
+${eopUpsert('EX009', 'SafeLinks')}`)
 
     case 'EX010': {
       const domains = (config.protectedDomains || '').split(',').map(s => s.trim()).filter(Boolean)
@@ -712,14 +712,7 @@ if (-not (Get-SafeLinksRule -Identity $pn -ErrorAction SilentlyContinue)) {
       return policyBlock(policy.id, policy.name,
         `$pn = ${psStr(displayName)}
 $p = @{ Enabled = ${$e}; EnableMailboxIntelligence = $true; EnableMailboxIntelligenceProtection = $true; EnableSpoofIntelligence = $true; EnableOrganizationDomainsProtection = $true; PhishThresholdLevel = 3; MailboxIntelligenceProtectionAction = 'Quarantine'; TargetedUserProtectionAction = 'Quarantine'; TargetedDomainProtectionAction = 'Quarantine' }${dLine}${uLine}
-if (Get-AntiPhishPolicy -Identity $pn -ErrorAction SilentlyContinue) {
-    Set-AntiPhishPolicy -Identity $pn @p
-} else {
-    New-AntiPhishPolicy -Name $pn @p | Out-Null
-}
-if (-not (Get-AntiPhishRule -Identity $pn -ErrorAction SilentlyContinue)) {
-    New-AntiPhishRule -Name $pn -AntiPhishPolicy $pn -RecipientDomainIs (Get-AcceptedDomain).DomainName | Out-Null
-}`)
+${eopUpsert('EX010', 'AntiPhish')}`)
     }
 
     case 'EX011': return policyBlock(policy.id, policy.name,
