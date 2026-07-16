@@ -349,6 +349,26 @@ describe('EX001 - Enable DKIM Signing', () => {
   test('creates DKIM config if missing', () => {
     expect(s).toContain('New-DkimSigningConfig')
   })
+  test('captures the domain name before the try/catch ($_ is the ErrorRecord inside catch)', () => {
+    expect(s).toContain('$domain = $_.DomainName')
+    expect(s).toContain('New-DkimSigningConfig -DomainName $domain')
+    expect(s).not.toContain('New-DkimSigningConfig -DomainName $_.DomainName')
+  })
+})
+
+describe('EX006 - Anti-Malware: Default Policy', () => {
+  let s
+  beforeAll(() => { s = script1('EX006', EX, 'Anti-Malware Default') })
+
+  test('uses FileTypeAction instead of the removed Action parameter', () => {
+    expect(s).toContain('Set-MalwareFilterPolicy')
+    expect(s).toContain("-FileTypeAction 'Reject'")
+    expect(s).not.toContain('-Action DeleteMessage')
+  })
+  test('enables the common attachments filter', () => {
+    expect(s).toContain('-EnableFileFilter')
+    expect(s).toContain("'exe'")
+  })
 })
 
 describe('EX004 - Anti-Spam Inbound Policy', () => {
@@ -439,8 +459,21 @@ describe('EX017 - Transport Rule: Block Macro-Enabled Docs', () => {
     expect(s).toContain('xlsm')
     expect(s).toContain('pptm')
   })
+  test('uses AttachmentExtensionMatchesWords (AttachmentFileExtensionMatchesWords does not exist)', () => {
+    expect(s).toContain('-AttachmentExtensionMatchesWords')
+    expect(s).not.toContain('AttachmentFileExtensionMatchesWords')
+  })
   test('prepends warning to subject', () => {
     expect(s).toContain('[MACRO WARNING]')
+  })
+})
+
+describe('EX035 - Zero-Hour Auto Purge (ZAP)', () => {
+  test('uses SpamZapEnabled/PhishZapEnabled (ZapEnabled only exists on the malware policy)', () => {
+    const s = script1('EX035', EX, 'Zero-Hour Auto Purge')
+    expect(s).toContain('-SpamZapEnabled $true')
+    expect(s).toContain('-PhishZapEnabled $true')
+    expect(s).not.toContain('-ZapEnabled')
   })
 })
 
@@ -849,10 +882,9 @@ describe('buildScript - IPPS connection', () => {
     const s = buildScript([pol('CA001', CA, 'MFA')], null, '', 'interactive', {})
     expect(s).not.toContain('Connect-IPPSSession')
   })
-  test('-Device is guarded by a PowerShell 7 version check (unsupported on 5.1)', () => {
+  test('never passes -Device (Connect-IPPSSession has no device code flow)', () => {
     const s = buildScript([pol('AC007', AC, 'DLP')], null, '', 'interactive', {})
-    expect(s).toContain('Connect-IPPSSession -Device')
-    expect(s).toContain('$PSVersionTable.PSVersion.Major -ge 7')
+    expect(s).not.toContain('Connect-IPPSSession -Device')
     expect(s).toContain('Connect-IPPSSession -ShowBanner:$false -ErrorAction Stop')
   })
   test('aborts the run when the IPPS connection fails', () => {

@@ -277,8 +277,18 @@ try {
     const flag = kind === 'ipps' ? 'ippsConnected' : 'exoConnected'
     if (this[flag]) return
     const label = kind === 'ipps' ? 'Security & Compliance' : 'Exchange Online'
-    const cmdlet = kind === 'ipps' ? 'Connect-IPPSSession' : 'Connect-ExchangeOnline'
     const uriMatch = kind === 'ipps' ? 'compliance' : 'outlook'
+    // Connect-IPPSSession has no -Device parameter (any module version) — only
+    // Connect-ExchangeOnline supports device code flow, and only on PS7. For
+    // IPPS pass the signed-in UPN so the cached MSAL token is reused silently.
+    const upn = this.context?.Account ? ` -UserPrincipalName '${String(this.context.Account).replace(/'/g, "''")}'` : ''
+    const connect = kind === 'ipps'
+      ? `Connect-IPPSSession${upn} -ShowBanner:$false -ErrorAction Stop`
+      : `if ($PSVersionTable.PSVersion.Major -ge 7) {
+      Connect-ExchangeOnline -Device -ShowBanner:$false -ErrorAction Stop
+    } else {
+      Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+    }`
     const out = await this._exec(`
 try {
   Import-Module ExchangeOnlineManagement -ErrorAction Stop
@@ -286,11 +296,7 @@ try {
     Where-Object { $_.State -eq 'Connected' -and "$($_.ConnectionUri)" -match '${uriMatch}' }
   if (-not $_conn) {
     Write-Output "CONNECTING: ${label}..."
-    if ($PSVersionTable.PSVersion.Major -ge 7) {
-      ${cmdlet} -Device -ShowBanner:$false -ErrorAction Stop
-    } else {
-      ${cmdlet} -ShowBanner:$false -ErrorAction Stop
-    }
+    ${connect}
   }
   Write-Output "CONNECTED: ${label}"
 } catch {

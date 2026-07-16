@@ -236,17 +236,14 @@ try {
 }`
 }
 
+// Connect-IPPSSession does not support -Device on any PowerShell version —
+// device code flow only exists on Connect-ExchangeOnline. Interactive mode
+// therefore always uses the browser sign-in window for Security & Compliance.
 function buildConnectIpps(credentials, authMode) {
   if (authMode === 'interactive') {
     return `Write-Output "CONNECTING: Security & Compliance..."
 try {
-    if ($PSVersionTable.PSVersion.Major -ge 7) {
-        Write-Output "CONNECTING: Security & Compliance (device code)..."
-        Connect-IPPSSession -Device -ShowBanner:$false -ErrorAction Stop
-    } else {
-        Write-Output "INFO: Device code sign-in needs PowerShell 7 - opening a sign-in window instead..."
-        Connect-IPPSSession -ShowBanner:$false -ErrorAction Stop
-    }
+    Connect-IPPSSession -ShowBanner:$false -ErrorAction Stop
     Write-Output "CONNECTED: Security & Compliance"
 } catch {
     Write-Output "ERROR: IPPS connect failed - $($_.Exception.Message)"
@@ -630,9 +627,10 @@ function buildEXScript(policy, config, prefix) {
   const _raw = (() => { switch (policy.id) {
     case 'EX001': return policyBlock(policy.id, policy.name,
       `Get-AcceptedDomain | Where-Object { $_.DomainType -eq 'Authoritative' } | ForEach-Object {
-    try { Set-DkimSigningConfig -Identity $_.DomainName -Enabled ${$e} -ErrorAction Stop }
-    catch { New-DkimSigningConfig -DomainName $_.DomainName -Enabled ${$e} | Out-Null }
-    Write-Output "  DKIM configured: $($_.DomainName)"
+    $domain = $_.DomainName
+    try { Set-DkimSigningConfig -Identity $domain -Enabled ${$e} -ErrorAction Stop }
+    catch { New-DkimSigningConfig -DomainName $domain -Enabled ${$e} | Out-Null }
+    Write-Output "  DKIM configured: $domain"
 }`)
 
     case 'EX004': {
@@ -655,7 +653,7 @@ Set-HostedOutboundSpamFilterPolicy -Identity 'Default' @p | Out-Null
 Write-Output "  Outbound spam limits configured on Default policy"`)
 
     case 'EX006': return policyBlock(policy.id, policy.name,
-      `Set-MalwareFilterPolicy -Identity 'Default' -EnableFileFilter ${$e} -Action DeleteMessage -FileTypes @('ace','ani','app','docm','exe','jar','reg','scr','vbe','vbs','cmd','com','cpl','hta','pif','js') | Out-Null`)
+      `Set-MalwareFilterPolicy -Identity 'Default' -EnableFileFilter ${$e} -FileTypeAction 'Reject' -FileTypes @('ace','ani','app','docm','exe','jar','reg','scr','vbe','vbs','cmd','com','cpl','hta','pif','js') | Out-Null`)
 
     case 'EX007': return policyBlock(policy.id, policy.name,
       `Set-MalwareFilterPolicy -Identity 'Default' -EnableFileFilter ${$e} -FileTypes @('ace','ani','app','bat','cab','cmd','com','cpl','dll','exe','hta','inf','jar','js','jse','lnk','msi','pif','ps1','reg','scr','url','vb','vbe','vbs','wsc','wsf','wsh','xll') | Out-Null`)
@@ -717,7 +715,7 @@ Write-Output "  Mailbox audit enabled for all user mailboxes"`)
     case 'EX017': return policyBlock(policy.id, policy.name,
       `$rn = ${psStr(displayName)}
 if (-not (Get-TransportRule -Identity $rn -ErrorAction SilentlyContinue)) {
-    New-TransportRule -Name $rn -AttachmentFileExtensionMatchesWords @('docm','xlsm','pptm','xlam','dotm') -PrependSubject '[MACRO WARNING] ' -Mode ${enabled ? 'Enforce' : 'Audit'} | Out-Null
+    New-TransportRule -Name $rn -AttachmentExtensionMatchesWords @('docm','xlsm','pptm','xlam','dotm') -PrependSubject '[MACRO WARNING] ' -Mode ${enabled ? 'Enforce' : 'Audit'} | Out-Null
 }`)
 
     case 'EX018': return policyBlock(policy.id, policy.name,
@@ -742,7 +740,7 @@ if (-not (Get-TransportRule -Identity $rn -ErrorAction SilentlyContinue)) {
 }`)
 
     case 'EX035': return policyBlock(policy.id, policy.name,
-      `Set-HostedContentFilterPolicy -Identity 'Default' -ZapEnabled ${$e} | Out-Null`)
+      `Set-HostedContentFilterPolicy -Identity 'Default' -SpamZapEnabled ${$e} -PhishZapEnabled ${$e} | Out-Null`)
 
     case 'EX036': return policyBlock(policy.id, policy.name,
       `Get-CASMailbox -ResultSize Unlimited | Where-Object { -not $_.SmtpClientAuthenticationDisabled } | ForEach-Object {
