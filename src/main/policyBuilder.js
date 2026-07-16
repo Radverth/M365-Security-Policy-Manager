@@ -203,6 +203,22 @@ try {
 $mgCred = $null; $mgPass = $null; [System.GC]::Collect()`
 }
 
+// After connecting EXO/IPPS, confirm the session landed in the same tenant as
+// the Graph sign-in. Interactive/device-code sign-ins let the admin pick any
+// account — a wrong-tenant session would deploy every Exchange policy into the
+// wrong tenant while reporting success. Skipped when Graph isn't connected
+// (EXO-only runs have no tenant to compare against).
+function tenantGuard(uriMatch, errPrefix) {
+  return `$_mgTid = $null
+    try { $_mgTid = (Get-MgContext -ErrorAction SilentlyContinue).TenantId } catch {}
+    $_c = @(Get-ConnectionInformation -ErrorAction SilentlyContinue) | Where-Object { $_.State -eq 'Connected' -and "$($_.ConnectionUri)" -match '${uriMatch}' } | Select-Object -First 1
+    if ($_mgTid -and $_c -and "$($_c.TenantID)" -ne "$_mgTid") {
+        Write-Output "ERROR: ${errPrefix} connect failed - signed in to tenant $($_c.TenantID) but Microsoft Graph is connected to tenant $_mgTid. Use the same admin account for both sign-ins."
+        Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+        exit 1
+    }`
+}
+
 // The -Device switch (device code flow) only exists on PowerShell 7 — Windows
 // PowerShell 5.1 throws "A parameter cannot be found that matches parameter
 // name 'Device'". On 5.1 fall back to the interactive sign-in window.
@@ -219,6 +235,7 @@ try {
         Write-Output "INFO: Device code sign-in needs PowerShell 7 - opening a sign-in window instead..."
         Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
     }
+    ${tenantGuard('outlook', 'EXO')}
     Write-Output "CONNECTED: Exchange Online"
 } catch {
     Write-Output "ERROR: EXO connect failed - $($_.Exception.Message)"
@@ -229,6 +246,7 @@ try {
   return `Write-Output "CONNECTING: Exchange Online..."
 try {
     Connect-ExchangeOnline ${upn} -ShowBanner:$false
+    ${tenantGuard('outlook', 'EXO')}
     Write-Output "CONNECTED: Exchange Online"
 } catch {
     Write-Output "ERROR: EXO connect failed - $($_.Exception.Message)"
@@ -244,6 +262,7 @@ function buildConnectIpps(credentials, authMode) {
     return `Write-Output "CONNECTING: Security & Compliance..."
 try {
     Connect-IPPSSession -ShowBanner:$false -ErrorAction Stop
+    ${tenantGuard('compliance', 'IPPS')}
     Write-Output "CONNECTED: Security & Compliance"
 } catch {
     Write-Output "ERROR: IPPS connect failed - $($_.Exception.Message)"
@@ -254,6 +273,7 @@ try {
   return `Write-Output "CONNECTING: Security & Compliance..."
 try {
     Connect-IPPSSession ${upn} -ShowBanner:$false
+    ${tenantGuard('compliance', 'IPPS')}
     Write-Output "CONNECTED: Security & Compliance"
 } catch {
     Write-Output "ERROR: IPPS connect failed - $($_.Exception.Message)"
@@ -643,6 +663,8 @@ if (Get-HostedContentFilterPolicy -Identity $pn -ErrorAction SilentlyContinue) {
     Set-HostedContentFilterPolicy -Identity $pn @p
 } else {
     New-HostedContentFilterPolicy -Name $pn @p | Out-Null
+}
+if (-not (Get-HostedContentFilterRule -Identity $pn -ErrorAction SilentlyContinue)) {
     New-HostedContentFilterRule -Name $pn -HostedContentFilterPolicy $pn -RecipientDomainIs (Get-AcceptedDomain).DomainName | Out-Null
 }`)
     }
@@ -665,6 +687,8 @@ if (Get-SafeAttachmentPolicy -Identity $pn -ErrorAction SilentlyContinue) {
     Set-SafeAttachmentPolicy -Identity $pn @p
 } else {
     New-SafeAttachmentPolicy -Name $pn @p | Out-Null
+}
+if (-not (Get-SafeAttachmentRule -Identity $pn -ErrorAction SilentlyContinue)) {
     New-SafeAttachmentRule -Name $pn -SafeAttachmentPolicy $pn -RecipientDomainIs (Get-AcceptedDomain).DomainName | Out-Null
 }`)
 
@@ -675,6 +699,8 @@ if (Get-SafeLinksPolicy -Identity $pn -ErrorAction SilentlyContinue) {
     Set-SafeLinksPolicy -Identity $pn @p
 } else {
     New-SafeLinksPolicy -Name $pn @p | Out-Null
+}
+if (-not (Get-SafeLinksRule -Identity $pn -ErrorAction SilentlyContinue)) {
     New-SafeLinksRule -Name $pn -SafeLinksPolicy $pn -RecipientDomainIs (Get-AcceptedDomain).DomainName | Out-Null
 }`)
 
@@ -690,6 +716,8 @@ if (Get-AntiPhishPolicy -Identity $pn -ErrorAction SilentlyContinue) {
     Set-AntiPhishPolicy -Identity $pn @p
 } else {
     New-AntiPhishPolicy -Name $pn @p | Out-Null
+}
+if (-not (Get-AntiPhishRule -Identity $pn -ErrorAction SilentlyContinue)) {
     New-AntiPhishRule -Name $pn -AntiPhishPolicy $pn -RecipientDomainIs (Get-AcceptedDomain).DomainName | Out-Null
 }`)
     }

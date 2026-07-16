@@ -390,6 +390,10 @@ describe('EX004 - Anti-Spam Inbound Policy', () => {
     expect(s).toContain('Get-HostedContentFilterPolicy')
     expect(s).toContain('Set-HostedContentFilterPolicy')
   })
+  test('creates the rule even when the policy already exists (heals orphaned policies)', () => {
+    const s = script1('EX004', EX, 'Anti-Spam Inbound')
+    expect(s).toContain('if (-not (Get-HostedContentFilterRule -Identity $pn -ErrorAction SilentlyContinue))')
+  })
   test('SPF hard fail uses the SpamFilteringOption enum, not a boolean', () => {
     const s = script1('EX004', EX, 'Anti-Spam Inbound')
     expect(s).toContain("MarkAsSpamSpfRecordHardFail = 'On'")
@@ -404,6 +408,11 @@ describe('EX009 - Safe Links Policy', () => {
     expect(s).not.toContain('IsEnabled')
     expect(s).toContain('EnableSafeLinksForEmail = $true')
   })
+  test('creates the rule even when the policy already exists (heals orphaned policies)', () => {
+    const s = script1('EX009', EX, 'Safe Links')
+    expect(s).toContain('if (-not (Get-SafeLinksRule -Identity $pn -ErrorAction SilentlyContinue))')
+    expect(s).toContain('New-SafeLinksRule')
+  })
 })
 
 describe('EX008 - Safe Attachments Policy', () => {
@@ -417,8 +426,19 @@ describe('EX008 - Safe Attachments Policy', () => {
     expect(s).toContain('New-SafeAttachmentRule')
     expect(s).toContain('Get-AcceptedDomain')
   })
+  test('creates the rule even when the policy already exists (heals orphaned policies)', () => {
+    expect(s).toContain('if (-not (Get-SafeAttachmentRule -Identity $pn -ErrorAction SilentlyContinue))')
+  })
   test('sets action to Block', () => {
     expect(s).toContain("Action = 'Block'")
+  })
+})
+
+describe('EX010 - Anti-Phishing Policy', () => {
+  test('creates the rule even when the policy already exists (heals orphaned policies)', () => {
+    const s = script1('EX010', EX, 'Anti-Phishing')
+    expect(s).toContain('if (-not (Get-AntiPhishRule -Identity $pn -ErrorAction SilentlyContinue))')
+    expect(s).toContain('New-AntiPhishRule')
   })
 })
 
@@ -870,6 +890,13 @@ describe('buildScript - EXO connection', () => {
     const s = buildScript([pol('EX001', EX, 'DKIM')], null, '', 'interactive', {})
     const catchBlock = s.split('ERROR: EXO connect failed')[1]
     expect(catchBlock).toContain('exit 1')
+  })
+  test('aborts when the EXO session tenant differs from the Graph tenant', () => {
+    const s = buildScript([pol('EX001', EX, 'DKIM'), pol('CA001', CA, 'MFA')], null, '', 'interactive', {})
+    expect(s).toContain('Get-ConnectionInformation')
+    expect(s).toContain('but Microsoft Graph is connected to tenant')
+    const guard = s.split('but Microsoft Graph is connected to tenant')[1]
+    expect(guard).toContain('exit 1')
   })
 })
 
