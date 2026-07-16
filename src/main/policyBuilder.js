@@ -203,6 +203,22 @@ try {
 $mgCred = $null; $mgPass = $null; [System.GC]::Collect()`
 }
 
+// After connecting EXO/IPPS, confirm the session landed in the same tenant as
+// the Graph sign-in. Interactive/device-code sign-ins let the admin pick any
+// account — a wrong-tenant session would deploy every Exchange policy into the
+// wrong tenant while reporting success. Skipped when Graph isn't connected
+// (EXO-only runs have no tenant to compare against).
+function tenantGuard(uriMatch, errPrefix) {
+  return `$_mgTid = $null
+    try { $_mgTid = (Get-MgContext -ErrorAction SilentlyContinue).TenantId } catch {}
+    $_c = @(Get-ConnectionInformation -ErrorAction SilentlyContinue) | Where-Object { $_.State -eq 'Connected' -and "$($_.ConnectionUri)" -match '${uriMatch}' } | Select-Object -First 1
+    if ($_mgTid -and $_c -and "$($_c.TenantID)" -ne "$_mgTid") {
+        Write-Output "ERROR: ${errPrefix} connect failed - signed in to tenant $($_c.TenantID) but Microsoft Graph is connected to tenant $_mgTid. Use the same admin account for both sign-ins."
+        Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+        exit 1
+    }`
+}
+
 // The -Device switch (device code flow) only exists on PowerShell 7 — Windows
 // PowerShell 5.1 throws "A parameter cannot be found that matches parameter
 // name 'Device'". On 5.1 fall back to the interactive sign-in window.
@@ -219,6 +235,7 @@ try {
         Write-Output "INFO: Device code sign-in needs PowerShell 7 - opening a sign-in window instead..."
         Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
     }
+    ${tenantGuard('outlook', 'EXO')}
     Write-Output "CONNECTED: Exchange Online"
 } catch {
     Write-Output "ERROR: EXO connect failed - $($_.Exception.Message)"
@@ -229,6 +246,7 @@ try {
   return `Write-Output "CONNECTING: Exchange Online..."
 try {
     Connect-ExchangeOnline ${upn} -ShowBanner:$false
+    ${tenantGuard('outlook', 'EXO')}
     Write-Output "CONNECTED: Exchange Online"
 } catch {
     Write-Output "ERROR: EXO connect failed - $($_.Exception.Message)"
@@ -236,17 +254,15 @@ try {
 }`
 }
 
+// Connect-IPPSSession does not support -Device on any PowerShell version —
+// device code flow only exists on Connect-ExchangeOnline. Interactive mode
+// therefore always uses the browser sign-in window for Security & Compliance.
 function buildConnectIpps(credentials, authMode) {
   if (authMode === 'interactive') {
     return `Write-Output "CONNECTING: Security & Compliance..."
 try {
-    if ($PSVersionTable.PSVersion.Major -ge 7) {
-        Write-Output "CONNECTING: Security & Compliance (device code)..."
-        Connect-IPPSSession -Device -ShowBanner:$false -ErrorAction Stop
-    } else {
-        Write-Output "INFO: Device code sign-in needs PowerShell 7 - opening a sign-in window instead..."
-        Connect-IPPSSession -ShowBanner:$false -ErrorAction Stop
-    }
+    Connect-IPPSSession -ShowBanner:$false -ErrorAction Stop
+    ${tenantGuard('compliance', 'IPPS')}
     Write-Output "CONNECTED: Security & Compliance"
 } catch {
     Write-Output "ERROR: IPPS connect failed - $($_.Exception.Message)"
@@ -257,6 +273,7 @@ try {
   return `Write-Output "CONNECTING: Security & Compliance..."
 try {
     Connect-IPPSSession ${upn} -ShowBanner:$false
+    ${tenantGuard('compliance', 'IPPS')}
     Write-Output "CONNECTED: Security & Compliance"
 } catch {
     Write-Output "ERROR: IPPS connect failed - $($_.Exception.Message)"
@@ -630,9 +647,10 @@ function buildEXScript(policy, config, prefix) {
   const _raw = (() => { switch (policy.id) {
     case 'EX001': return policyBlock(policy.id, policy.name,
       `Get-AcceptedDomain | Where-Object { $_.DomainType -eq 'Authoritative' } | ForEach-Object {
-    try { Set-DkimSigningConfig -Identity $_.DomainName -Enabled ${$e} -ErrorAction Stop }
-    catch { New-DkimSigningConfig -DomainName $_.DomainName -Enabled ${$e} | Out-Null }
-    Write-Output "  DKIM configured: $($_.DomainName)"
+    $domain = $_.DomainName
+    try { Set-DkimSigningConfig -Identity $domain -Enabled ${$e} -ErrorAction Stop }
+    catch { New-DkimSigningConfig -DomainName $domain -Enabled ${$e} | Out-Null }
+    Write-Output "  DKIM configured: $domain"
 }`)
 
     case 'EX004': {
@@ -645,6 +663,8 @@ if (Get-HostedContentFilterPolicy -Identity $pn -ErrorAction SilentlyContinue) {
     Set-HostedContentFilterPolicy -Identity $pn @p
 } else {
     New-HostedContentFilterPolicy -Name $pn @p | Out-Null
+}
+if (-not (Get-HostedContentFilterRule -Identity $pn -ErrorAction SilentlyContinue)) {
     New-HostedContentFilterRule -Name $pn -HostedContentFilterPolicy $pn -RecipientDomainIs (Get-AcceptedDomain).DomainName | Out-Null
 }`)
     }
@@ -655,7 +675,7 @@ Set-HostedOutboundSpamFilterPolicy -Identity 'Default' @p | Out-Null
 Write-Output "  Outbound spam limits configured on Default policy"`)
 
     case 'EX006': return policyBlock(policy.id, policy.name,
-      `Set-MalwareFilterPolicy -Identity 'Default' -EnableFileFilter ${$e} -Action DeleteMessage -FileTypes @('ace','ani','app','docm','exe','jar','reg','scr','vbe','vbs','cmd','com','cpl','hta','pif','js') | Out-Null`)
+      `Set-MalwareFilterPolicy -Identity 'Default' -EnableFileFilter ${$e} -FileTypeAction 'Reject' -FileTypes @('ace','ani','app','docm','exe','jar','reg','scr','vbe','vbs','cmd','com','cpl','hta','pif','js') | Out-Null`)
 
     case 'EX007': return policyBlock(policy.id, policy.name,
       `Set-MalwareFilterPolicy -Identity 'Default' -EnableFileFilter ${$e} -FileTypes @('ace','ani','app','bat','cab','cmd','com','cpl','dll','exe','hta','inf','jar','js','jse','lnk','msi','pif','ps1','reg','scr','url','vb','vbe','vbs','wsc','wsf','wsh','xll') | Out-Null`)
@@ -667,6 +687,8 @@ if (Get-SafeAttachmentPolicy -Identity $pn -ErrorAction SilentlyContinue) {
     Set-SafeAttachmentPolicy -Identity $pn @p
 } else {
     New-SafeAttachmentPolicy -Name $pn @p | Out-Null
+}
+if (-not (Get-SafeAttachmentRule -Identity $pn -ErrorAction SilentlyContinue)) {
     New-SafeAttachmentRule -Name $pn -SafeAttachmentPolicy $pn -RecipientDomainIs (Get-AcceptedDomain).DomainName | Out-Null
 }`)
 
@@ -677,6 +699,8 @@ if (Get-SafeLinksPolicy -Identity $pn -ErrorAction SilentlyContinue) {
     Set-SafeLinksPolicy -Identity $pn @p
 } else {
     New-SafeLinksPolicy -Name $pn @p | Out-Null
+}
+if (-not (Get-SafeLinksRule -Identity $pn -ErrorAction SilentlyContinue)) {
     New-SafeLinksRule -Name $pn -SafeLinksPolicy $pn -RecipientDomainIs (Get-AcceptedDomain).DomainName | Out-Null
 }`)
 
@@ -692,6 +716,8 @@ if (Get-AntiPhishPolicy -Identity $pn -ErrorAction SilentlyContinue) {
     Set-AntiPhishPolicy -Identity $pn @p
 } else {
     New-AntiPhishPolicy -Name $pn @p | Out-Null
+}
+if (-not (Get-AntiPhishRule -Identity $pn -ErrorAction SilentlyContinue)) {
     New-AntiPhishRule -Name $pn -AntiPhishPolicy $pn -RecipientDomainIs (Get-AcceptedDomain).DomainName | Out-Null
 }`)
     }
@@ -717,7 +743,7 @@ Write-Output "  Mailbox audit enabled for all user mailboxes"`)
     case 'EX017': return policyBlock(policy.id, policy.name,
       `$rn = ${psStr(displayName)}
 if (-not (Get-TransportRule -Identity $rn -ErrorAction SilentlyContinue)) {
-    New-TransportRule -Name $rn -AttachmentFileExtensionMatchesWords @('docm','xlsm','pptm','xlam','dotm') -PrependSubject '[MACRO WARNING] ' -Mode ${enabled ? 'Enforce' : 'Audit'} | Out-Null
+    New-TransportRule -Name $rn -AttachmentExtensionMatchesWords @('docm','xlsm','pptm','xlam','dotm') -PrependSubject '[MACRO WARNING] ' -Mode ${enabled ? 'Enforce' : 'Audit'} | Out-Null
 }`)
 
     case 'EX018': return policyBlock(policy.id, policy.name,
@@ -742,7 +768,7 @@ if (-not (Get-TransportRule -Identity $rn -ErrorAction SilentlyContinue)) {
 }`)
 
     case 'EX035': return policyBlock(policy.id, policy.name,
-      `Set-HostedContentFilterPolicy -Identity 'Default' -ZapEnabled ${$e} | Out-Null`)
+      `Set-HostedContentFilterPolicy -Identity 'Default' -SpamZapEnabled ${$e} -PhishZapEnabled ${$e} | Out-Null`)
 
     case 'EX036': return policyBlock(policy.id, policy.name,
       `Get-CASMailbox -ResultSize Unlimited | Where-Object { -not $_.SmtpClientAuthenticationDisabled } | ForEach-Object {

@@ -270,26 +270,52 @@ try {
   // re-authenticating on every deploy. The MSAL token cached by the Graph
   // sign-in usually lets these connect without prompting at all; when a
   // prompt is needed the device-code line streams to the UI like any other
-  // session output. No-op when already connected.
+  // session output.
+  //
+  // Every call re-validates that the EXO/IPPS session belongs to the SAME
+  // tenant as the Graph sign-in (this.context.TenantId). A session left over
+  // from a previously connected tenant — or a device-code sign-in done with
+  // the wrong account — would otherwise deploy every Exchange policy into the
+  // wrong tenant while reporting success. Mismatched sessions are closed and
+  // reconnected; a fresh sign-in that lands in the wrong tenant is an error.
   async _connectExoLike(kind, timeoutMs) {
     if (!this.alive) throw new Error('No active session — connect a tenant first')
     await this._ensureReady()
     const flag = kind === 'ipps' ? 'ippsConnected' : 'exoConnected'
-    if (this[flag]) return
     const label = kind === 'ipps' ? 'Security & Compliance' : 'Exchange Online'
-    const cmdlet = kind === 'ipps' ? 'Connect-IPPSSession' : 'Connect-ExchangeOnline'
     const uriMatch = kind === 'ipps' ? 'compliance' : 'outlook'
+    const tid = this.context?.TenantId ? String(this.context.TenantId).replace(/'/g, "''") : ''
+    // Connect-IPPSSession has no -Device parameter (any module version) — only
+    // Connect-ExchangeOnline supports device code flow, and only on PS7. For
+    // IPPS pass the signed-in UPN so the cached MSAL token is reused silently.
+    const upn = this.context?.Account ? ` -UserPrincipalName '${String(this.context.Account).replace(/'/g, "''")}'` : ''
+    const connect = kind === 'ipps'
+      ? `Connect-IPPSSession${upn} -ShowBanner:$false -ErrorAction Stop`
+      : `if ($PSVersionTable.PSVersion.Major -ge 7) {
+      Connect-ExchangeOnline -Device -ShowBanner:$false -ErrorAction Stop
+    } else {
+      Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+    }`
     const out = await this._exec(`
 try {
   Import-Module ExchangeOnlineManagement -ErrorAction Stop
-  $_conn = @(Get-ConnectionInformation -ErrorAction SilentlyContinue) |
-    Where-Object { $_.State -eq 'Connected' -and "$($_.ConnectionUri)" -match '${uriMatch}' }
-  if (-not $_conn) {
+  $_tid = '${tid}'
+  $_find = { @(Get-ConnectionInformation -ErrorAction SilentlyContinue) |
+    Where-Object { $_.State -eq 'Connected' -and "$($_.ConnectionUri)" -match '${uriMatch}' } }
+  $_all = @(& $_find)
+  $_stale = @($_all | Where-Object { $_tid -and "$($_.TenantID)" -ne $_tid })
+  if ($_stale) {
+    Write-Output "INFO: Closing ${label} session from a different tenant..."
+    Disconnect-ExchangeOnline -ConnectionId $_stale.ConnectionId -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+    $_all = @(& $_find)
+  }
+  if (-not $_all) {
     Write-Output "CONNECTING: ${label}..."
-    if ($PSVersionTable.PSVersion.Major -ge 7) {
-      ${cmdlet} -Device -ShowBanner:$false -ErrorAction Stop
-    } else {
-      ${cmdlet} -ShowBanner:$false -ErrorAction Stop
+    ${connect}
+    $_new = @(& $_find) | Select-Object -First 1
+    if ($_tid -and $_new -and "$($_new.TenantID)" -ne $_tid) {
+      Disconnect-ExchangeOnline -ConnectionId $_new.ConnectionId -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+      throw "signed in to tenant $($_new.TenantID), but this app session is connected to tenant $_tid. Sign in with an admin account from the connected tenant."
     }
   }
   Write-Output "CONNECTED: ${label}"
