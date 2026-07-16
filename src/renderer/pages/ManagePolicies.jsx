@@ -180,6 +180,7 @@ const TRIGGER_META = {
   'pre-edit':   { label: 'Pre-Edit',    cls: 'bg-amber-100 text-amber-700' },
   'pre-delete': { label: 'Pre-Delete',  cls: 'bg-red-100 text-red-700' },
   manual:       { label: 'Manual',      cls: 'bg-gray-100 text-gray-600' },
+  itglue:       { label: 'IT Glue',     cls: 'bg-purple-100 text-purple-700' },
 }
 
 function fmtBackupTime(ts) {
@@ -211,6 +212,159 @@ function TriggerBadge({ trigger }) {
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${meta.cls}`}>
       {meta.label}
     </span>
+  )
+}
+
+// ── Backup destination modal ──────────────────────────────────────────────────
+// Lets the user pick where "Backup Now" goes: a local folder (JSON + PDF) or
+// IT Glue (zip attached to a new document in the chosen organisation).
+function BackupDestinationModal({ open, onClose, onLocal, onItGlue, uploading }) {
+  const { orgs, orgsLoading, loadOrgs, settings } = useStore()
+  const [destination, setDestination] = useState('folder')
+  const [selectedOrg, setSelectedOrg] = useState(null)
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    if (open) {
+      setDestination('folder')
+      setSelectedOrg(null)
+      setSearch('')
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (open && destination === 'itglue' && settings.itGlueApiKey) loadOrgs()
+  }, [open, destination])
+
+  const hasApiKey = !!settings.itGlueApiKey
+  const filteredOrgs = orgs.filter(o => !search || o.name.toLowerCase().includes(search.toLowerCase()))
+  const canConfirm = destination === 'folder' || (hasApiKey && !!selectedOrg)
+
+  const handleConfirm = () => {
+    if (destination === 'folder') {
+      onClose()
+      onLocal()
+    } else if (selectedOrg) {
+      onItGlue(selectedOrg)
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={uploading ? undefined : onClose} title="Backup Now" size="lg">
+      <div className="space-y-4 pb-1">
+        <p className="text-sm text-gray-500">
+          Every backup contains a restorable JSON manifest, one JSON file per policy, and a
+          detailed PDF report. Choose where to store it.
+        </p>
+
+        {/* Destination cards */}
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            { id: 'folder', label: 'Save to Folder', desc: 'Export JSON + PDF to a folder of your choice', icon: (
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+              </svg>
+            ) },
+            { id: 'itglue', label: 'Upload to IT Glue', desc: 'Attach a zip to a new document in an organisation', icon: (
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
+              </svg>
+            ) },
+          ].map(d => (
+            <button
+              key={d.id}
+              onClick={() => !uploading && setDestination(d.id)}
+              disabled={uploading}
+              className={[
+                'flex flex-col items-start gap-1.5 px-4 py-3.5 rounded-lg border-2 text-left transition-all cursor-pointer disabled:cursor-not-allowed',
+                destination === d.id ? 'border-navy bg-navy-50' : 'border-gray-200 hover:border-gray-300 bg-white',
+              ].join(' ')}
+            >
+              <span className={destination === d.id ? 'text-navy' : 'text-gray-400'}>{d.icon}</span>
+              <span className={`text-sm font-semibold ${destination === d.id ? 'text-navy' : 'text-gray-700'}`}>{d.label}</span>
+              <span className="text-xs text-gray-500 leading-snug">{d.desc}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* IT Glue organisation picker */}
+        {destination === 'itglue' && (
+          !hasApiKey ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              IT Glue API key not configured. Set it in <strong>Settings → IT Glue</strong> first.
+            </div>
+          ) : (
+            <div>
+              <p className="text-sm font-medium text-gray-700 mb-2">Upload to organisation</p>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search organisations..."
+                disabled={uploading}
+                className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm mb-2 focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy disabled:bg-gray-50"
+              />
+              <div className="max-h-44 overflow-y-auto space-y-1 pr-1">
+                {orgsLoading
+                  ? Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-11 bg-gray-100 rounded-lg animate-pulse" />)
+                  : filteredOrgs.length === 0
+                    ? <p className="text-sm text-gray-400 py-4 text-center">No organisations found</p>
+                    : filteredOrgs.map((o) => (
+                        <button
+                          key={o.id}
+                          onClick={() => !uploading && setSelectedOrg(o)}
+                          disabled={uploading}
+                          className={[
+                            'w-full flex items-center justify-between px-4 py-2.5 rounded-lg border text-left text-sm transition-all disabled:cursor-not-allowed',
+                            selectedOrg?.id === o.id ? 'border-navy bg-navy-50 text-navy font-medium' : 'border-gray-200 hover:border-gray-300',
+                          ].join(' ')}
+                        >
+                          <span>{o.name}</span>
+                          <span className="flex items-center gap-2">
+                            {o.shortName && <span className="text-xs text-gray-400">{o.shortName}</span>}
+                            {selectedOrg?.id === o.id && (
+                              <svg className="w-4 h-4 text-navy" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </span>
+                        </button>
+                      ))
+                }
+              </div>
+              <p className="text-xs text-gray-400 mt-2">
+                A document named <span className="font-medium text-gray-500">M365 Policy Backup - &lt;tenant&gt; - &lt;date&gt;</span> will
+                be created in the organisation's Documents section with the backup zip attached.
+              </p>
+            </div>
+          )
+        )}
+
+        {/* Footer */}
+        <div className="flex justify-end gap-2 pt-2 border-t border-gray-100 -mx-6 px-6 pb-2">
+          <Button variant="secondary" onClick={onClose} disabled={uploading}>Cancel</Button>
+          <Button variant="primary" onClick={handleConfirm} loading={uploading} disabled={!canConfirm}>
+            {destination === 'folder' ? (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0 0l-4-4m4 4l4-4" />
+                </svg>
+                Choose Folder…
+              </>
+            ) : (
+              <>
+                {!uploading && (
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 16V4m0 0l-4 4m4-4l4 4" />
+                  </svg>
+                )}
+                {uploading ? 'Uploading…' : 'Upload to IT Glue'}
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   )
 }
 
@@ -323,7 +477,7 @@ function BackupRestoreModal({ open, onClose }) {
         <div className="space-y-3 pt-1">
           <p className="text-xs text-gray-500">
             Backups are created automatically before edits, deletions, and when policies are first loaded from a tenant.
-            Use <strong>Backup Now</strong> to also export a full copy (JSON + PDF) to a folder of your choice.
+            Use <strong>Backup Now</strong> to also export a full copy (JSON + PDF) to a folder of your choice, or upload it as a zip to IT Glue.
           </p>
 
           {loadingList ? (
@@ -710,7 +864,9 @@ export default function ManagePolicies() {
   const [lastBackup, setLastBackup] = useState(null)
   const [backupCount, setBackupCount] = useState(0)
   const [showBackups, setShowBackups] = useState(false)
+  const [showBackupDest, setShowBackupDest] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [itglueUploading, setItglueUploading] = useState(false)
   // Effective connection: prefer local connectedAs, fall back to global session
   const effectiveSession = connectedAs || tenantSession
 
@@ -743,40 +899,48 @@ export default function ManagePolicies() {
     } catch {}
   }
 
+  // Make sure policies are available for a full backup (loads them from the
+  // tenant if the table hasn't been populated yet). Returns { pols, session }
+  // or null when nothing can be backed up.
+  const ensurePoliciesForBackup = async () => {
+    let pols = policies
+    let session = connectedAs || tenantSession
+    if (pols.length === 0) {
+      const result = await window.api.policies.list()
+      if (result?.error) {
+        addNotification('Could not load policies: ' + result.error, 'error')
+        return null
+      }
+      pols = Array.isArray(result?.policies) ? result.policies : []
+      if (result?.context) {
+        setConnectedAs(result.context)
+        session = result.context
+      }
+      setPolicies(pols)
+      if (pols.length === 0) {
+        addNotification('No policies found in this tenant to back up', 'error')
+        return null
+      }
+    }
+    return { pols, session }
+  }
+
   // One-click full backup to disk: JSON manifest + per-policy JSON files + PDF.
-  // Loads policies from the tenant first if the table hasn't been populated yet.
   const handleExportBackup = async () => {
     if (!window.api?.backup?.export) return
     setExporting(true)
     try {
-      let pols = policies
-      let session = connectedAs || tenantSession
-      if (pols.length === 0) {
-        const result = await window.api.policies.list()
-        if (result?.error) {
-          addNotification('Could not load policies: ' + result.error, 'error')
-          return
-        }
-        pols = Array.isArray(result?.policies) ? result.policies : []
-        if (result?.context) {
-          setConnectedAs(result.context)
-          session = result.context
-        }
-        setPolicies(pols)
-        if (pols.length === 0) {
-          addNotification('No policies found in this tenant to back up', 'error')
-          return
-        }
-      }
+      const loaded = await ensurePoliciesForBackup()
+      if (!loaded) return
       const result = await window.api.backup.export({
-        policies: pols,
-        tenantId: session?.TenantId,
-        account: session?.Account,
+        policies: loaded.pols,
+        tenantId: loaded.session?.TenantId,
+        account: loaded.session?.Account,
       })
       if (result?.cancelled) return
       if (result?.success) {
         addNotification(`Backed up ${result.policyCount} polic${result.policyCount === 1 ? 'y' : 'ies'} (JSON + PDF) to ${result.folder}`, 'success')
-        setLastBackup({ timestamp: result.timestamp, trigger: 'manual', policyCount: pols.length })
+        setLastBackup({ timestamp: result.timestamp, trigger: 'manual', policyCount: loaded.pols.length })
         setBackupCount(c => c + 1)
       } else {
         addNotification('Backup failed: ' + (result?.error || 'Unknown error'), 'error')
@@ -785,6 +949,36 @@ export default function ManagePolicies() {
       addNotification('Backup failed: ' + err.message, 'error')
     } finally {
       setExporting(false)
+    }
+  }
+
+  // Full backup to IT Glue: the same artifacts zipped and attached to a new
+  // document in the chosen organisation's Documents section.
+  const handleItGlueBackup = async (org) => {
+    if (!window.api?.backup?.uploadToItGlue || !org) return
+    setItglueUploading(true)
+    try {
+      const loaded = await ensurePoliciesForBackup()
+      if (!loaded) return
+      const result = await window.api.backup.uploadToItGlue({
+        policies: loaded.pols,
+        tenantId: loaded.session?.TenantId,
+        account: loaded.session?.Account,
+        orgId: org.id,
+        orgName: org.name,
+      })
+      if (result?.success) {
+        addNotification(`Uploaded ${result.policyCount} polic${result.policyCount === 1 ? 'y' : 'ies'} to IT Glue — "${result.documentName}" in ${org.name}`, 'success')
+        setLastBackup({ timestamp: result.timestamp, trigger: 'itglue', policyCount: loaded.pols.length })
+        setBackupCount(c => c + 1)
+        setShowBackupDest(false)
+      } else {
+        addNotification('IT Glue upload failed: ' + (result?.error || 'Unknown error'), 'error')
+      }
+    } catch (err) {
+      addNotification('IT Glue upload failed: ' + err.message, 'error')
+    } finally {
+      setItglueUploading(false)
     }
   }
 
@@ -1001,11 +1195,11 @@ export default function ManagePolicies() {
                 <Button size="sm" variant="secondary" onClick={() => setShowBackups(true)}>
                   View Backups
                 </Button>
-                <Button size="sm" variant="primary" onClick={handleExportBackup} loading={exporting}>
+                <Button size="sm" variant="primary" onClick={() => setShowBackupDest(true)} loading={exporting || itglueUploading}>
                   <svg className="w-3.5 h-3.5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0 0l-4-4m4 4l4-4" />
                   </svg>
-                  Backup Now (JSON + PDF)
+                  Backup Now
                 </Button>
               </div>
             </div>
@@ -1059,7 +1253,7 @@ export default function ManagePolicies() {
               </svg>
               Backups
             </Button>
-            <Button size="sm" variant="secondary" onClick={handleExportBackup} loading={exporting}>
+            <Button size="sm" variant="secondary" onClick={() => setShowBackupDest(true)} loading={exporting || itglueUploading}>
               <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0 0l-4-4m4 4l4-4" />
               </svg>
@@ -1209,6 +1403,15 @@ export default function ManagePolicies() {
       <BackupRestoreModal
         open={showBackups}
         onClose={() => setShowBackups(false)}
+      />
+
+      {/* Backup destination modal */}
+      <BackupDestinationModal
+        open={showBackupDest}
+        onClose={() => setShowBackupDest(false)}
+        onLocal={handleExportBackup}
+        onItGlue={handleItGlueBackup}
+        uploading={itglueUploading}
       />
     </div>
   )

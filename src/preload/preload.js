@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('api', {
     create: (data) => ipcRenderer.invoke('backup:create', data),
     /** One-click export of all policies to a folder as JSON + PDF */
     export: (data) => ipcRenderer.invoke('backup:export', data),
+    uploadToItGlue: (data) => ipcRenderer.invoke('backup:uploadToItGlue', data),
     list: () => ipcRenderer.invoke('backup:list'),
     get: (filename) => ipcRenderer.invoke('backup:get', filename),
     restore: (policy) => ipcRenderer.invoke('backup:restore', policy),
