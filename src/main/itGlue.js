@@ -93,6 +93,80 @@ class ItGlueClient {
     return allOrgs
   }
 
+  // Human-readable message for an IT Glue API error
+  static describeError(err) {
+    const status = err.response?.status
+    if (status === 401) return 'Invalid API key — check your IT Glue settings'
+    if (status === 403) return 'API key does not have permission to write documents in this organisation'
+    if (status === 404) return 'Endpoint not found — your IT Glue plan or API key may not support the Documents API'
+    if (status === 413) return 'Backup is too large for IT Glue to accept as an attachment'
+    if (status === 422) {
+      const detail = err.response?.data?.errors?.[0]?.detail || err.response?.data?.errors?.[0]?.title
+      return `IT Glue rejected the request${detail ? `: ${detail}` : ''}`
+    }
+    return err.response?.data?.errors?.[0]?.title ||
+           err.response?.data?.message ||
+           err.message
+  }
+
+  // Creates an (empty) document in the organisation's Documents section.
+  // POST /organizations/:org_id/relationships/documents
+  async createDocument(orgId, name) {
+    const client = this.getClient()
+    const resp = await client.post(
+      `/organizations/${encodeURIComponent(orgId)}/relationships/documents`,
+      { data: { type: 'documents', attributes: { name } } },
+    )
+    const doc = Array.isArray(resp.data?.data) ? resp.data.data[0] : resp.data?.data
+    if (!doc?.id) throw new Error('IT Glue did not return a document ID')
+    return { id: doc.id, name: doc.attributes?.name || name }
+  }
+
+  // Attaches a file (base64-encoded) to an existing document.
+  // POST /documents/:document_id/relationships/attachments
+  async attachFileToDocument(documentId, fileName, contentBase64) {
+    const client = this.getClient()
+    await client.post(
+      `/documents/${encodeURIComponent(documentId)}/relationships/attachments`,
+      { data: { type: 'attachments', attributes: { attachment: { content: contentBase64, file_name: fileName } } } },
+      // Attachment payloads can be several MB of base64 — allow a generous window
+      { timeout: 180000, maxBodyLength: Infinity, maxContentLength: Infinity },
+    )
+    return true
+  }
+
+  // Creates a document in the org's Documents section and attaches the given
+  // file to it. Cleans up nothing on failure — a document without its
+  // attachment is surfaced in the error message so the user can retry or
+  // delete it manually.
+  async uploadBackup({ orgId, documentName, fileName, contentBase64 }) {
+    if (!getApiKey()) return { success: false, error: 'IT Glue API key not configured — set it in Settings' }
+    if (!orgId) return { success: false, error: 'No IT Glue organisation selected' }
+
+    let doc
+    try {
+      doc = await this.createDocument(orgId, documentName)
+    } catch (err) {
+      const msg = ItGlueClient.describeError(err)
+      logger.error('IT Glue createDocument error:', err.response?.status, err.message)
+      return { success: false, error: `Could not create document: ${msg}` }
+    }
+
+    try {
+      await this.attachFileToDocument(doc.id, fileName, contentBase64)
+    } catch (err) {
+      const msg = ItGlueClient.describeError(err)
+      logger.error('IT Glue attachFileToDocument error:', err.response?.status, err.message)
+      return {
+        success: false,
+        error: `Document "${doc.name}" was created but the zip upload failed: ${msg}. Delete the empty document in IT Glue before retrying.`,
+      }
+    }
+
+    logger.info(`IT Glue backup uploaded: org=${orgId} document=${doc.id} file=${fileName}`)
+    return { success: true, documentId: doc.id, documentName: doc.name }
+  }
+
   async getPasswords(orgId) {
     if (!orgId) return []
     try {
