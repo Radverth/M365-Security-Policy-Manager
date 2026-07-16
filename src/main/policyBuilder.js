@@ -641,7 +641,7 @@ if ($_r.state -ne '${state}') { Write-Output "  WARNING: state was not applied �
 // these policy types cannot be renamed once created (Set-* has no -Name), so
 // the existing name is kept. Also guarantees the recipient rule exists: the
 // Defender portal doesn't display a policy that has no rule.
-function eopUpsert(id, noun) {
+function eopUpsert(id, noun, scopeParam = 'RecipientDomainIs') {
   return `$_existing = @(Get-${noun}Policy -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $pn -or $_.Name -like '*${id}:*' } | Sort-Object { $_.Name -ne $pn }) | Select-Object -First 1
 if ($_existing) {
     $pn = $_existing.Name
@@ -651,8 +651,19 @@ if ($_existing) {
     New-${noun}Policy -Name $pn @p | Out-Null
 }
 if (-not @(Get-${noun}Rule -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $pn -or "$($_.${noun}Policy)" -eq $pn })) {
-    New-${noun}Rule -Name $pn -${noun}Policy $pn -RecipientDomainIs (Get-AcceptedDomain).DomainName | Out-Null
+    New-${noun}Rule -Name $pn -${noun}Policy $pn -${scopeParam} (Get-AcceptedDomain).DomainName | Out-Null
 }`
+}
+
+// EX007/EX025/EX035 refine a policy that another item deploys (EX006 anti-
+// malware, EX004 anti-spam). Targets the app-created policy when it exists so
+// the refinement isn't silently overridden by policy precedence; falls back to
+// the built-in Default policy otherwise.
+function eopRefine(ownerId, noun, settings) {
+  return `$_owner = @(Get-${noun}Policy -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*${ownerId}:*' }) | Select-Object -First 1
+$_id = if ($_owner) { $_owner.Name } else { 'Default' }
+Set-${noun}Policy -Identity $_id ${settings} | Out-Null
+Write-Output "  Applied to policy: $_id"`
 }
 
 function buildEXScript(policy, config, prefix) {
@@ -684,15 +695,18 @@ ${eopUpsert('EX004', 'HostedContentFilter')}`)
     }
 
     case 'EX005': return policyBlock(policy.id, policy.name,
-      `$p = @{ RecipientLimitExternalPerHour = 500; RecipientLimitInternalPerHour = 1000; RecipientLimitPerDay = 1000; ActionWhenThresholdReached = 'BlockUserForToday'; AutoForwardingMode = 'Off' }
-Set-HostedOutboundSpamFilterPolicy -Identity 'Default' @p | Out-Null
-Write-Output "  Outbound spam limits configured on Default policy"`)
+      `$pn = ${psStr(displayName)}
+$p = @{ RecipientLimitExternalPerHour = 500; RecipientLimitInternalPerHour = 1000; RecipientLimitPerDay = 1000; ActionWhenThresholdReached = 'BlockUserForToday'; AutoForwardingMode = 'Off' }
+${eopUpsert('EX005', 'HostedOutboundSpamFilter', 'SenderDomainIs')}`)
 
     case 'EX006': return policyBlock(policy.id, policy.name,
-      `Set-MalwareFilterPolicy -Identity 'Default' -EnableFileFilter ${$e} -FileTypeAction 'Reject' -FileTypes @('ace','ani','app','docm','exe','jar','reg','scr','vbe','vbs','cmd','com','cpl','hta','pif','js') | Out-Null`)
+      `$pn = ${psStr(displayName)}
+$p = @{ EnableFileFilter = ${$e}; FileTypeAction = 'Reject'; FileTypes = @('ace','ani','app','docm','exe','jar','reg','scr','vbe','vbs','cmd','com','cpl','hta','pif','js') }
+${eopUpsert('EX006', 'MalwareFilter')}`)
 
     case 'EX007': return policyBlock(policy.id, policy.name,
-      `Set-MalwareFilterPolicy -Identity 'Default' -EnableFileFilter ${$e} -FileTypes @('ace','ani','app','bat','cab','cmd','com','cpl','dll','exe','hta','inf','jar','js','jse','lnk','msi','pif','ps1','reg','scr','url','vb','vbe','vbs','wsc','wsf','wsh','xll') | Out-Null`)
+      eopRefine('EX006', 'MalwareFilter',
+        `-EnableFileFilter ${$e} -FileTypes @('ace','ani','app','bat','cab','cmd','com','cpl','dll','exe','hta','inf','jar','js','jse','lnk','msi','pif','ps1','reg','scr','url','vb','vbe','vbs','wsc','wsf','wsh','xll')`))
 
     case 'EX008': return policyBlock(policy.id, policy.name,
       `$pn = ${psStr(displayName)}
@@ -707,11 +721,15 @@ ${eopUpsert('EX009', 'SafeLinks')}`)
     case 'EX010': {
       const domains = (config.protectedDomains || '').split(',').map(s => s.trim()).filter(Boolean)
       const users   = (config.protectedUsers || '').split(',').map(s => s.trim()).filter(Boolean)
-      const dLine   = domains.length ? `\n$p.TargetedDomainsToProtect = @(${domains.map(d=>`'${safe(d)}'`).join(', ')})` : ''
-      const uLine   = users.length   ? `\n$p.TargetedUsersToProtect   = @(${users.map(u=>`'${safe(u)}'`).join(', ')})` : ''
+      // TargetedUsersToProtect entries must be 'DisplayName;EmailAddress' —
+      // the config field collects plain emails, so reuse the email as the name.
+      const fmtUser = (u) => u.includes(';') ? u : `${u};${u}`
+      const dLine   = domains.length ? `\n$p.EnableTargetedDomainsProtection = $true\n$p.TargetedDomainsToProtect = @(${domains.map(d=>`'${safe(d)}'`).join(', ')})` : ''
+      const uLine   = users.length   ? `\n$p.EnableTargetedUserProtection = $true\n$p.TargetedUsersToProtect = @(${users.map(u=>`'${safe(fmtUser(u))}'`).join(', ')})` : ''
+      const noUsersWarn = users.length ? '' : `\nWrite-Output "  WARNING: EX010 — user impersonation protection is OFF: add Protected Users (emails) in this policy's settings to enable it"`
       return policyBlock(policy.id, policy.name,
         `$pn = ${psStr(displayName)}
-$p = @{ Enabled = ${$e}; EnableMailboxIntelligence = $true; EnableMailboxIntelligenceProtection = $true; EnableSpoofIntelligence = $true; EnableOrganizationDomainsProtection = $true; PhishThresholdLevel = 3; MailboxIntelligenceProtectionAction = 'Quarantine'; TargetedUserProtectionAction = 'Quarantine'; TargetedDomainProtectionAction = 'Quarantine' }${dLine}${uLine}
+$p = @{ Enabled = ${$e}; EnableMailboxIntelligence = $true; EnableMailboxIntelligenceProtection = $true; EnableSpoofIntelligence = $true; EnableOrganizationDomainsProtection = $true; EnableSimilarUsersSafetyTips = $true; EnableSimilarDomainsSafetyTips = $true; EnableUnusualCharactersSafetyTips = $true; PhishThresholdLevel = 3; MailboxIntelligenceProtectionAction = 'Quarantine'; TargetedUserProtectionAction = 'Quarantine'; TargetedDomainProtectionAction = 'Quarantine' }${dLine}${uLine}${noUsersWarn}
 ${eopUpsert('EX010', 'AntiPhish')}`)
     }
 
@@ -746,7 +764,7 @@ if (-not (Get-TransportRule -Identity $rn -ErrorAction SilentlyContinue)) {
 }`)
 
     case 'EX025': return policyBlock(policy.id, policy.name,
-      `Set-HostedContentFilterPolicy -Identity 'Default' -BulkThreshold 6 | Out-Null`)
+      eopRefine('EX004', 'HostedContentFilter', '-BulkThreshold 6'))
 
     case 'EX031': return policyBlock(policy.id, policy.name,
       `Get-CASMailbox -ResultSize Unlimited | ForEach-Object {
@@ -761,7 +779,7 @@ if (-not (Get-TransportRule -Identity $rn -ErrorAction SilentlyContinue)) {
 }`)
 
     case 'EX035': return policyBlock(policy.id, policy.name,
-      `Set-HostedContentFilterPolicy -Identity 'Default' -SpamZapEnabled ${$e} -PhishZapEnabled ${$e} | Out-Null`)
+      eopRefine('EX004', 'HostedContentFilter', `-SpamZapEnabled ${$e} -PhishZapEnabled ${$e}`))
 
     case 'EX036': return policyBlock(policy.id, policy.name,
       `Get-CASMailbox -ResultSize Unlimited | Where-Object { -not $_.SmtpClientAuthenticationDisabled } | ForEach-Object {
