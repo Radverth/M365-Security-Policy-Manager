@@ -85,6 +85,9 @@ describe('policyBlock format (via CA001)', () => {
   test('sets ErrorActionPreference to Stop', () => {
     expect(s).toContain("$ErrorActionPreference = 'Stop'")
   })
+  test('forces ErrorAction Stop across module boundaries via PSDefaultParameterValues', () => {
+    expect(s).toContain("$PSDefaultParameterValues['*:ErrorAction'] = 'Stop'")
+  })
 })
 
 // ─── skipBlock format ─────────────────────────────────────────────────────────
@@ -433,10 +436,10 @@ describe('EX004 - Anti-Spam Inbound Policy', () => {
     expect(s).toContain("$_.Name -like '*EX004:*'")
     expect(s).toContain('$pn = $_existing.Name')
   })
-  test('SPF hard fail uses the SpamFilteringOption enum, not a boolean', () => {
+  test('omits deprecated ASF and empty region blocklist settings that fail server-side', () => {
     const s = script1('EX004', EX, 'Anti-Spam Inbound')
-    expect(s).toContain("MarkAsSpamSpfRecordHardFail = 'On'")
-    expect(s).not.toContain('MarkAsSpamSpfRecordHardFail = $true')
+    expect(s).not.toContain('MarkAsSpamSpfRecordHardFail')
+    expect(s).not.toContain('EnableRegionBlockList')
   })
 })
 
@@ -503,6 +506,22 @@ describe('EX010 - Anti-Phishing Policy', () => {
     const s = script1('EX010', EX, 'Anti-Phishing', { protectedUsers: 'The CEO;ceo@contoso.com' })
     expect(s).toContain("'The CEO;ceo@contoso.com'")
     expect(s).not.toContain("'The CEO;ceo@contoso.com;The CEO;ceo@contoso.com'")
+  })
+  test('accepts EntityPicker user objects, using display name + mail', () => {
+    const s = script1('EX010', EX, 'Anti-Phishing', { protectedUsers: [
+      { id: 'guid-1', displayName: 'The CEO', mail: 'ceo@contoso.com' },
+      { id: 'cfo@contoso.com', displayName: 'cfo@contoso.com' },
+      { id: 'guid-2', displayName: 'No Mail User' },
+    ] })
+    expect(s).toContain("'The CEO;ceo@contoso.com'")
+    expect(s).toContain("'cfo@contoso.com;cfo@contoso.com'")
+    expect(s).not.toContain('No Mail User')
+    expect(s).toContain('$p.EnableTargetedUserProtection = $true')
+  })
+  test('an array of only unusable entries leaves impersonation off with the warning', () => {
+    const s = script1('EX010', EX, 'Anti-Phishing', { protectedUsers: [{ id: 'guid-2', displayName: 'No Mail User' }] })
+    expect(s).toContain('user impersonation protection is OFF')
+    expect(s).not.toContain('EnableTargetedUserProtection')
   })
   test('enables domain impersonation protection when protected domains are configured', () => {
     const s = script1('EX010', EX, 'Anti-Phishing', { protectedDomains: 'contoso.com' })

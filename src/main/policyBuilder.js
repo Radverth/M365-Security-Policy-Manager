@@ -4,7 +4,13 @@
 
 const PS_PREFS = `$ProgressPreference = 'SilentlyContinue'
 $VerbosePreference = 'SilentlyContinue'
-$ErrorActionPreference = 'Stop'`
+$ErrorActionPreference = 'Stop'
+# Preference variables do NOT propagate into module functions (the EXO v3
+# cmdlets), so their errors could stay non-terminating, skip the catch block
+# and report a false SUCCESS. PSDefaultParameterValues applies at parameter
+# binding, which does cross module boundaries; explicit -ErrorAction
+# SilentlyContinue on existence checks still overrides it.
+$PSDefaultParameterValues['*:ErrorAction'] = 'Stop'`
 
 function safe(s) { return (s || '').replace(/'/g, "''") }
 function psStr(s) { return `'${safe(s)}'` }
@@ -690,7 +696,7 @@ function buildEXScript(policy, config, prefix) {
       const hcSpam = config.highConfidenceSpamAction || 'Quarantine'
       return policyBlock(policy.id, policy.name,
         `$pn = ${psStr(displayName)}
-$p = @{ SpamAction = '${safe(spam)}'; HighConfidenceSpamAction = '${safe(hcSpam)}'; PhishSpamAction = 'Quarantine'; HighConfidencePhishAction = 'Quarantine'; BulkThreshold = 6; MarkAsSpamSpfRecordHardFail = 'On'; EnableRegionBlockList = ${$e} }
+$p = @{ SpamAction = '${safe(spam)}'; HighConfidenceSpamAction = '${safe(hcSpam)}'; PhishSpamAction = 'Quarantine'; HighConfidencePhishAction = 'Quarantine'; BulkThreshold = 6 }
 ${eopUpsert('EX004', 'HostedContentFilter')}`)
     }
 
@@ -720,9 +726,20 @@ ${eopUpsert('EX009', 'SafeLinks')}`)
 
     case 'EX010': {
       const domains = (config.protectedDomains || '').split(',').map(s => s.trim()).filter(Boolean)
-      const users   = (config.protectedUsers || '').split(',').map(s => s.trim()).filter(Boolean)
-      // TargetedUsersToProtect entries must be 'DisplayName;EmailAddress' —
-      // the config field collects plain emails, so reuse the email as the name.
+      // protectedUsers is an EntityPicker array ({id, displayName, mail}) in
+      // current configs, or a comma-separated email string in older templates.
+      // TargetedUsersToProtect entries must be 'DisplayName;EmailAddress'.
+      const rawUsers = config.protectedUsers
+      const users = (Array.isArray(rawUsers)
+        ? rawUsers.map(u => {
+            if (typeof u === 'string') return u.trim()
+            const mail = u?.mail || (String(u?.id || '').includes('@') ? u.id : '')
+            if (!mail) return ''
+            const name = (u.displayName && u.displayName !== u.id ? u.displayName : mail).replace(/;/g, '')
+            return `${name};${mail}`
+          })
+        : String(rawUsers || '').split(',').map(s => s.trim())
+      ).filter(Boolean)
       const fmtUser = (u) => u.includes(';') ? u : `${u};${u}`
       const dLine   = domains.length ? `\n$p.EnableTargetedDomainsProtection = $true\n$p.TargetedDomainsToProtect = @(${domains.map(d=>`'${safe(d)}'`).join(', ')})` : ''
       const uLine   = users.length   ? `\n$p.EnableTargetedUserProtection = $true\n$p.TargetedUsersToProtect = @(${users.map(u=>`'${safe(fmtUser(u))}'`).join(', ')})` : ''

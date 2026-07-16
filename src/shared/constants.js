@@ -259,7 +259,7 @@ export const POLICY_EXTRA_FIELDS = {
   ],
   EX010: [
     { key: 'protectedDomains', label: 'Protected Domains', type: 'text', default: '', hint: 'Your tenant domains to protect from impersonation (comma-sep)' },
-    { key: 'protectedUsers', label: 'Protected Users (emails)', type: 'text', default: '', hint: 'Key users to protect from impersonation (comma-sep emails)' },
+    { key: 'protectedUsers', label: 'Protected Users', type: 'entity-users', default: [], hint: 'Key users (execs, finance) to protect from impersonation — search by name or email' },
   ],
   EX029: [{ key: 'retentionYears', label: 'Retention Period (years)', type: 'number', default: 7, min: 1, max: 10 }],
   EN004: [{ key: 'minOsVersion', label: 'Min Windows Version', type: 'text', default: '10.0.19045.0', hint: 'e.g. 10.0.22621.0 for Win 11 22H2' }],
