@@ -356,18 +356,51 @@ describe('EX001 - Enable DKIM Signing', () => {
   })
 })
 
-describe('EX006 - Anti-Malware: Default Policy', () => {
+describe('EX006 - Anti-Malware Policy', () => {
   let s
-  beforeAll(() => { s = script1('EX006', EX, 'Anti-Malware Default') })
+  beforeAll(() => { s = script1('EX006', EX, 'Anti-Malware Policy') })
 
+  test('creates a named policy with a recipient rule instead of editing Default', () => {
+    expect(s).toContain('New-MalwareFilterPolicy')
+    expect(s).toContain('New-MalwareFilterRule')
+    expect(s).not.toContain("-Identity 'Default'")
+  })
   test('uses FileTypeAction instead of the removed Action parameter', () => {
-    expect(s).toContain('Set-MalwareFilterPolicy')
-    expect(s).toContain("-FileTypeAction 'Reject'")
+    expect(s).toContain("FileTypeAction = 'Reject'")
     expect(s).not.toContain('-Action DeleteMessage')
   })
   test('enables the common attachments filter', () => {
-    expect(s).toContain('-EnableFileFilter')
+    expect(s).toContain('EnableFileFilter')
     expect(s).toContain("'exe'")
+  })
+  test('adopts an existing policy created under a different prefix (matches by policy ID)', () => {
+    expect(s).toContain("$_.Name -like '*EX006:*'")
+    expect(s).toContain('$pn = $_existing.Name')
+  })
+})
+
+describe('EX005 - Anti-Spam: Outbound Policy', () => {
+  let s
+  beforeAll(() => { s = script1('EX005', EX, 'Anti-Spam Outbound') })
+
+  test('creates a named policy scoped by sender domain instead of editing Default', () => {
+    expect(s).toContain('New-HostedOutboundSpamFilterPolicy')
+    expect(s).toContain('New-HostedOutboundSpamFilterRule')
+    expect(s).toContain('-SenderDomainIs (Get-AcceptedDomain).DomainName')
+    expect(s).not.toContain("-Identity 'Default'")
+  })
+  test('disables auto-forwarding and sets sending limits', () => {
+    expect(s).toContain("AutoForwardingMode = 'Off'")
+    expect(s).toContain('RecipientLimitExternalPerHour = 500')
+  })
+})
+
+describe('EX007 - Block Dangerous Attachment Types', () => {
+  test('targets the EX006 policy when present, falling back to Default', () => {
+    const s = script1('EX007', EX, 'Block Dangerous Attachments')
+    expect(s).toContain("$_.Name -like '*EX006:*'")
+    expect(s).toContain("$_id = if ($_owner) { $_owner.Name } else { 'Default' }")
+    expect(s).toContain('Set-MalwareFilterPolicy -Identity $_id')
   })
 })
 
@@ -460,6 +493,33 @@ describe('EX010 - Anti-Phishing Policy', () => {
     expect(s).toContain("$_.Name -like '*EX010:*'")
     expect(s).toContain('$pn = $_existing.Name')
   })
+  test('enables user impersonation protection when protected users are configured', () => {
+    const s = script1('EX010', EX, 'Anti-Phishing', { protectedUsers: 'ceo@contoso.com, cfo@contoso.com' })
+    expect(s).toContain('$p.EnableTargetedUserProtection = $true')
+    expect(s).toContain("'ceo@contoso.com;ceo@contoso.com'")
+    expect(s).not.toContain('user impersonation protection is OFF')
+  })
+  test('formats DisplayName;Email entries and keeps ones already formatted', () => {
+    const s = script1('EX010', EX, 'Anti-Phishing', { protectedUsers: 'The CEO;ceo@contoso.com' })
+    expect(s).toContain("'The CEO;ceo@contoso.com'")
+    expect(s).not.toContain("'The CEO;ceo@contoso.com;The CEO;ceo@contoso.com'")
+  })
+  test('enables domain impersonation protection when protected domains are configured', () => {
+    const s = script1('EX010', EX, 'Anti-Phishing', { protectedDomains: 'contoso.com' })
+    expect(s).toContain('$p.EnableTargetedDomainsProtection = $true')
+    expect(s).toContain("'contoso.com'")
+  })
+  test('warns in the deploy log when no protected users are configured', () => {
+    const s = script1('EX010', EX, 'Anti-Phishing')
+    expect(s).toContain('user impersonation protection is OFF')
+    expect(s).not.toContain('EnableTargetedUserProtection')
+  })
+  test('always enables impersonation safety tips', () => {
+    const s = script1('EX010', EX, 'Anti-Phishing')
+    expect(s).toContain('EnableSimilarUsersSafetyTips = $true')
+    expect(s).toContain('EnableSimilarDomainsSafetyTips = $true')
+    expect(s).toContain('EnableUnusualCharactersSafetyTips = $true')
+  })
 })
 
 describe('EX011 - Disable Auto-Forwarding', () => {
@@ -514,6 +574,19 @@ describe('EX035 - Zero-Hour Auto Purge (ZAP)', () => {
     expect(s).toContain('-SpamZapEnabled $true')
     expect(s).toContain('-PhishZapEnabled $true')
     expect(s).not.toContain('-ZapEnabled')
+  })
+  test('targets the EX004 policy when present, falling back to Default', () => {
+    const s = script1('EX035', EX, 'Zero-Hour Auto Purge')
+    expect(s).toContain("$_.Name -like '*EX004:*'")
+    expect(s).toContain('Set-HostedContentFilterPolicy -Identity $_id')
+  })
+})
+
+describe('EX025 - Junk Mail Threshold', () => {
+  test('targets the EX004 policy when present, falling back to Default', () => {
+    const s = script1('EX025', EX, 'Junk Mail Threshold')
+    expect(s).toContain("$_.Name -like '*EX004:*'")
+    expect(s).toContain('Set-HostedContentFilterPolicy -Identity $_id -BulkThreshold 6')
   })
 })
 
