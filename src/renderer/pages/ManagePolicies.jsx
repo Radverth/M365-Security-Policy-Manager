@@ -215,6 +215,22 @@ function TriggerBadge({ trigger }) {
   )
 }
 
+// Which policy domain a backup file holds ('ca' is implied for legacy files)
+const BACKUP_TYPE_META = {
+  intune: { label: 'Intune',   cls: 'bg-green-100 text-green-700' },
+  exo:    { label: 'Exchange', cls: 'bg-sky-100 text-sky-700' },
+}
+
+function BackupTypeBadge({ policyType }) {
+  const meta = BACKUP_TYPE_META[policyType]
+  if (!meta) return null
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${meta.cls}`}>
+      {meta.label}
+    </span>
+  )
+}
+
 // ── Backup destination modal ──────────────────────────────────────────────────
 // Lets the user pick where "Backup Now" goes: a local folder (JSON + PDF) or
 // IT Glue (zip attached to a new document in the chosen organisation).
@@ -425,7 +441,7 @@ function BackupRestoreModal({ open, onClose }) {
     let successCount = 0
     const failures = []
     for (const policy of toRestore) {
-      const result = await window.api.backup.restore(policy)
+      const result = await window.api.backup.restore(policy, selectedBackup.policyType || 'ca')
       if (result.success) {
         successCount++
       } else {
@@ -505,6 +521,7 @@ function BackupRestoreModal({ open, onClose }) {
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <TriggerBadge trigger={backup.trigger} />
+                    <BackupTypeBadge policyType={backup.policyType} />
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-gray-900">{fmtFullTs(backup.timestamp)}</p>
                       <p className="text-xs text-gray-500 truncate">
@@ -561,6 +578,7 @@ function BackupRestoreModal({ open, onClose }) {
             </button>
             <div className="flex items-center gap-2">
               <TriggerBadge trigger={selectedBackup?.trigger} />
+              <BackupTypeBadge policyType={selectedBackup?.policyType} />
               <span className="text-xs text-gray-400">{fmtFullTs(selectedBackup?.timestamp)}</span>
             </div>
           </div>
@@ -617,7 +635,7 @@ function BackupRestoreModal({ open, onClose }) {
                     <p className="text-sm font-medium text-gray-900 truncate">{name}</p>
                     <p className="text-xs text-gray-400 font-mono truncate">{id}</p>
                   </div>
-                  <div className="flex-shrink-0">{stateBadge(state)}</div>
+                  {state && <div className="flex-shrink-0">{stateBadge(state)}</div>}
                 </label>
               )
             })}
@@ -1029,12 +1047,14 @@ function IntunePolicyTable({ policies, loading, loaded, connected, onRefresh, on
         loading={deleteLoading}
       >
         <div className="py-2 space-y-3">
-          <p>Delete <strong>{deleteTarget?.DisplayName}</strong>? This removes the compliance policy and its assignments from Intune. This cannot be undone.</p>
-          <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-            <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          <p>Delete <strong>{deleteTarget?.DisplayName}</strong>? This removes the compliance policy and its assignments from Intune.</p>
+          <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+            <svg className="w-4 h-4 text-emerald-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
             </svg>
-            <p className="text-xs text-amber-800">Intune policies are not covered by the Conditional Access backup system.</p>
+            <p className="text-xs text-emerald-800">
+              A backup of the policy settings will be created automatically before deletion so you can restore it later. Group assignments are not restored.
+            </p>
           </div>
         </div>
       </Modal>
@@ -1043,7 +1063,14 @@ function IntunePolicyTable({ policies, loading, loaded, connected, onRefresh, on
 }
 
 // ── Exchange Online policies tab ───────────────────────────────────────────────
-function ExoPolicyTable({ policies, loading, loaded, connected, onRefresh, onDelete }) {
+// Only mail flow rules and custom anti-phish policies have a real enabled
+// state that EXO lets us flip; anti-spam/anti-malware policies and the default
+// anti-phish policy do not.
+function canToggleExo(policy) {
+  return policy.kind === 'transport' || (policy.kind === 'antiphish' && !policy.isDefault)
+}
+
+function ExoPolicyTable({ policies, loading, loaded, connected, onRefresh, onDelete, onToggle }) {
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
   const [detailTarget, setDetailTarget] = useState(null)
@@ -1132,6 +1159,11 @@ function ExoPolicyTable({ policies, loading, loaded, connected, onRefresh, onDel
                     <td className="px-6 py-3 text-right">
                       <div className="flex justify-end gap-1">
                         <Button size="sm" variant="ghost" onClick={() => setDetailTarget(policy)}>Details</Button>
+                        {canToggleExo(policy) && (
+                          <Button size="sm" variant="ghost" onClick={() => onToggle(policy)}>
+                            {String(policy.state).toLowerCase() === 'enabled' ? 'Disable' : 'Enable'}
+                          </Button>
+                        )}
                         {!policy.isDefault && (
                           <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(policy)}>
                             <span className="text-red-600">Delete</span>
@@ -1178,12 +1210,14 @@ function ExoPolicyTable({ policies, loading, loaded, connected, onRefresh, onDel
         loading={deleteLoading}
       >
         <div className="py-2 space-y-3">
-          <p>Delete <strong>{deleteTarget?.name}</strong> ({deleteTarget?.type})? This cannot be undone.</p>
-          <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-            <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          <p>Delete <strong>{deleteTarget?.name}</strong> ({deleteTarget?.type})?</p>
+          <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+            <svg className="w-4 h-4 text-emerald-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
             </svg>
-            <p className="text-xs text-amber-800">Exchange policies are not covered by the Conditional Access backup system.</p>
+            <p className="text-xs text-emerald-800">
+              A snapshot of the policy settings will be backed up automatically before deletion so it can be recreated later.
+            </p>
           </div>
         </div>
       </Modal>
@@ -1399,11 +1433,21 @@ export default function ManagePolicies() {
     }
   }
 
+  // The main process backs up the full policy before deleting; reflect that
+  // backup in the status card when it comes back.
+  const noteReturnedBackup = (backup) => {
+    if (backup?.timestamp) {
+      setLastBackup({ timestamp: backup.timestamp, trigger: 'pre-delete', policyCount: 1 })
+      setBackupCount(c => c + 1)
+    }
+  }
+
   const handleDeleteIntune = async (id) => {
     try {
       const res = await window.api.policies.deleteCompliance(id)
       if (res?.success) {
         setIntunePolicies(ps => ps.filter(p => p.Id !== id))
+        noteReturnedBackup(res.backup)
         addNotification('Compliance policy deleted', 'success')
       } else {
         addNotification('Delete failed', 'error')
@@ -1438,12 +1482,32 @@ export default function ManagePolicies() {
       const res = await window.api.policies.deleteExo(kind, identity)
       if (res?.success) {
         setExoPolicies(ps => ps.filter(p => !(p.kind === kind && p.identity === identity)))
+        noteReturnedBackup(res.backup)
         addNotification('Exchange policy deleted', 'success')
       } else {
         addNotification('Delete failed', 'error')
       }
     } catch (err) {
       addNotification('Delete failed: ' + err.message, 'error')
+    }
+  }
+
+  const handleToggleExo = async (policy) => {
+    const enable = String(policy.state).toLowerCase() !== 'enabled'
+    try {
+      const res = await window.api.policies.toggleExo(policy.kind, policy.identity, enable)
+      if (res?.success) {
+        setExoPolicies(ps => ps.map(p =>
+          (p.kind === policy.kind && p.identity === policy.identity)
+            ? { ...p, state: enable ? 'Enabled' : 'Disabled' }
+            : p
+        ))
+        addNotification(`Policy ${enable ? 'enabled' : 'disabled'}`, 'success')
+      } else {
+        addNotification('Toggle failed', 'error')
+      }
+    } catch (err) {
+      addNotification('Toggle failed: ' + err.message, 'error')
     }
   }
 
@@ -1842,6 +1906,7 @@ export default function ManagePolicies() {
           connected={!!effectiveSession}
           onRefresh={handleLoadExo}
           onDelete={handleDeleteExo}
+          onToggle={handleToggleExo}
         />
       )}
 

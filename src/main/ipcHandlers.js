@@ -2052,16 +2052,76 @@ try {
     }
   })
 
+  // Extracts JSON emitted between START/END markers from a script's output lines.
+  const parseMarkedJson = (lines, startMarker, endMarker) => {
+    const s = lines.indexOf(startMarker)
+    const e = lines.indexOf(endMarker)
+    if (s === -1 || e <= s) return null
+    try { return JSON.parse(lines.slice(s + 1, e).join('').trim()) } catch { return null }
+  }
+
   ipcMain.handle('policies:deleteCompliance', async (_, id) => {
     const safeId = safe(id)
+    // Capture the full policy (including scheduled actions, which Graph requires
+    // to recreate a compliance policy) before deleting, so it lands in the same
+    // restorable backup system as CA policies. Capture is best-effort — a failed
+    // fetch must not block the delete the user asked for.
     const script = `
+try {
+  $backup = Invoke-MgGraphRequest -Method GET -Uri ('https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies/${safeId}' + '?$expand=scheduledActionsForRule($expand=scheduledActionConfigurations)') -ErrorAction Stop
+  Write-Output "BACKUP_JSON_START"
+  ConvertTo-Json -InputObject $backup -Depth 10 -Compress
+  Write-Output "BACKUP_JSON_END"
+} catch {
+  Write-Output "WARN: backup capture failed - $($_.Exception.Message)"
+}
 try {
   Remove-MgDeviceManagementDeviceCompliancePolicy -DeviceCompliancePolicyId '${safeId}' -ErrorAction Stop
   Write-Output "SUCCESS"
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
 }`
-    const output = await psSession.run(script)
+    const lines = []
+    await psSession.run(script, l => lines.push(l), 120000)
+    const errorLine = lines.find(l => l.startsWith('ERROR:'))
+    if (errorLine) throw new Error(errorLine.slice('ERROR:'.length).trim())
+    const success = lines.some(l => l.trim() === 'SUCCESS')
+    let backup = null
+    const captured = parseMarkedJson(lines, 'BACKUP_JSON_START', 'BACKUP_JSON_END')
+    if (success && captured) {
+      try {
+        backup = writeInternalBackup({
+          policies: [captured],
+          tenantId: psSession.context?.TenantId,
+          account: psSession.context?.Account,
+          trigger: 'pre-delete',
+          policyType: 'intune',
+        })
+      } catch (err) {
+        logger.warn(`deleteCompliance backup write failed: ${err.message}`)
+      }
+    }
+    return { success, backup }
+  })
+
+  ipcMain.handle('policies:toggleExo', async (_, kind, identity, enable) => {
+    const safeId = safe(identity)
+    let cmd
+    if (kind === 'transport') {
+      cmd = `${enable ? 'Enable' : 'Disable'}-TransportRule -Identity '${safeId}' -Confirm:$false -ErrorAction Stop`
+    } else if (kind === 'antiphish') {
+      cmd = `Set-AntiPhishPolicy -Identity '${safeId}' -Enabled $${enable ? 'true' : 'false'} -ErrorAction Stop`
+    } else {
+      throw new Error(`Policy type '${kind}' does not support enable/disable`)
+    }
+    const script = `
+try {
+  ${cmd}
+  Write-Output "SUCCESS"
+} catch {
+  Write-Output "ERROR: $($_.Exception.Message)"
+}`
+    const output = await psSession.run(script, null, 120000)
     const lines = output.split('\n')
     const errorLine = lines.find(l => l.startsWith('ERROR:'))
     if (errorLine) throw new Error(errorLine.slice('ERROR:'.length).trim())
@@ -2075,10 +2135,10 @@ try {
   // one-sign-in-per-tenant session helper. Default policies (IsDefault) are
   // flagged so the UI can prevent deletion of built-in Microsoft policies.
   const EXO_KIND_META = {
-    antispam:    { type: 'Anti-Spam',       remove: 'Remove-HostedContentFilterPolicy' },
-    antimalware: { type: 'Anti-Malware',    remove: 'Remove-MalwareFilterPolicy' },
-    antiphish:   { type: 'Anti-Phishing',   remove: 'Remove-AntiPhishPolicy' },
-    transport:   { type: 'Mail Flow Rule',  remove: 'Remove-TransportRule' },
+    antispam:    { type: 'Anti-Spam',       get: 'Get-HostedContentFilterPolicy', new: 'New-HostedContentFilterPolicy', remove: 'Remove-HostedContentFilterPolicy' },
+    antimalware: { type: 'Anti-Malware',    get: 'Get-MalwareFilterPolicy',       new: 'New-MalwareFilterPolicy',       remove: 'Remove-MalwareFilterPolicy' },
+    antiphish:   { type: 'Anti-Phishing',   get: 'Get-AntiPhishPolicy',           new: 'New-AntiPhishPolicy',           remove: 'Remove-AntiPhishPolicy' },
+    transport:   { type: 'Mail Flow Rule',  get: 'Get-TransportRule',             new: 'New-TransportRule',             remove: 'Remove-TransportRule' },
   }
 
   ipcMain.handle('policies:listExo', async () => {
@@ -2152,18 +2212,51 @@ try {
     const meta = EXO_KIND_META[kind]
     if (!meta) throw new Error(`Unknown Exchange policy type: ${kind}`)
     const safeId = safe(identity)
+    // Snapshot every settable property before removing, so the policy can be
+    // recreated from the backup via parameter replay against ${meta.new}.
+    // Deep/derived properties that aren't cmdlet parameters are captured too
+    // (harmless — the restore path filters to valid parameters).
     const script = `
+try {
+  $backup = ${meta.get} -Identity '${safeId}' -ErrorAction Stop | Select-Object *
+  Write-Output "BACKUP_JSON_START"
+  ConvertTo-Json -InputObject $backup -Depth 4 -Compress -WarningAction SilentlyContinue
+  Write-Output "BACKUP_JSON_END"
+} catch {
+  Write-Output "WARN: backup capture failed - $($_.Exception.Message)"
+}
 try {
   ${meta.remove} -Identity '${safeId}' -Confirm:$false -ErrorAction Stop
   Write-Output "SUCCESS"
 } catch {
   Write-Output "ERROR: $($_.Exception.Message)"
 }`
-    const output = await psSession.run(script, null, 120000)
-    const lines = output.split('\n')
+    const lines = []
+    await psSession.run(script, l => lines.push(l), 120000)
     const errorLine = lines.find(l => l.startsWith('ERROR:'))
     if (errorLine) throw new Error(errorLine.slice('ERROR:'.length).trim())
-    return { success: lines.some(l => l.trim() === 'SUCCESS') }
+    const success = lines.some(l => l.trim() === 'SUCCESS')
+    let backup = null
+    const captured = parseMarkedJson(lines, 'BACKUP_JSON_START', 'BACKUP_JSON_END')
+    if (success && captured) {
+      try {
+        // Alias Id/DisplayName so the Backups modal (which renders CA-shaped
+        // entries) can display this policy, and stamp the kind for restore.
+        captured.kind = kind
+        captured.Id = captured.Guid || captured.Identity || captured.Name
+        captured.DisplayName = `${captured.Name || identity} (${meta.type})`
+        backup = writeInternalBackup({
+          policies: [captured],
+          tenantId: psSession.context?.TenantId,
+          account: psSession.context?.Account,
+          trigger: 'pre-delete',
+          policyType: 'exo',
+        })
+      } catch (err) {
+        logger.warn(`deleteExo backup write failed: ${err.message}`)
+      }
+    }
+    return { success, backup }
   })
 
   // ── Backup / Restore ──────────────────────────────────────────────────────
@@ -2171,7 +2264,7 @@ try {
 
   // Writes a backup JSON into the app's internal backup dir (restorable via the
   // Backups modal) and prunes old ones. Shared by backup:create and backup:export.
-  const writeInternalBackup = ({ policies: pols, tenantId, account, trigger }) => {
+  const writeInternalBackup = ({ policies: pols, tenantId, account, trigger, policyType = 'ca' }) => {
     const dir = getBackupDir()
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
     const ts = new Date().toISOString()
@@ -2183,6 +2276,7 @@ try {
       tenantId: tenantId || 'unknown',
       account: account || 'unknown',
       trigger,
+      policyType,
       policyCount: Array.isArray(pols) ? pols.length : 0,
       policies: Array.isArray(pols) ? pols : [],
     }
@@ -2499,8 +2593,126 @@ Generated by M365 Security Policy Manager v${app.getVersion()}
     }
   })
 
-  ipcMain.handle('backup:restore', async (_, policy) => {
+  // Strips response-only fields from a captured Intune compliance policy and
+  // guarantees the scheduledActionsForRule block Graph requires on creation.
+  function cleanCompliancePolicyForRestore(policy) {
+    const STRIP = new Set(['id', 'createdDateTime', 'lastModifiedDateTime', 'version', 'assignments'])
+    const cleaned = {}
+    for (const [k, v] of Object.entries(policy || {})) {
+      if (STRIP.has(k) || k.endsWith('@odata.context') || k.endsWith('@odata.count') || k.endsWith('@odata.nextLink')) continue
+      cleaned[k] = v
+    }
+    let rules = (Array.isArray(cleaned.scheduledActionsForRule) ? cleaned.scheduledActionsForRule : [])
+      .map(r => {
+        const { id: _rid, ...rest } = r || {}
+        const configs = (Array.isArray(rest.scheduledActionConfigurations) ? rest.scheduledActionConfigurations : [])
+          .map(c => { const { id: _cid, ...crest } = c || {}; return crest })
+        return { ...rest, scheduledActionConfigurations: configs }
+      })
+      .filter(r => (r.scheduledActionConfigurations || []).length > 0)
+    if (rules.length === 0) {
+      // Graph rejects compliance policy creation without at least one scheduled
+      // action — default to an immediate block, matching the portal's default.
+      rules = [{
+        ruleName: 'PasswordRequired',
+        scheduledActionConfigurations: [{
+          actionType: 'block',
+          gracePeriodHours: 0,
+          notificationTemplateId: '00000000-0000-0000-0000-000000000000',
+          notificationMessageCCList: [],
+        }],
+      }]
+    }
+    cleaned.scheduledActionsForRule = rules
+    return cleaned
+  }
+
+  // Recreates an Intune compliance policy from a backup snapshot via Graph POST.
+  const restoreCompliancePolicy = async (policy) => {
+    const cleaned = cleanCompliancePolicyForRestore(policy)
+    const b64 = Buffer.from(JSON.stringify(cleaned)).toString('base64')
+    const script = `
+try {
+  $body = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64}'))
+  $result = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies" -Body $body -ContentType 'application/json' -ErrorAction Stop
+  Write-Output "SUCCESS"
+} catch {
+  $errMsg = $_.Exception.Message
+  $detail = ''
+  try {
+    $edm = $_.ErrorDetails.Message
+    if ($edm) {
+      $parsed = $edm | ConvertFrom-Json -ErrorAction SilentlyContinue
+      if ($parsed -and $parsed.error) { $detail = "$($parsed.error.code): $($parsed.error.message)" }
+      else { $detail = $edm }
+    }
+  } catch {}
+  Write-Output "ERROR: $errMsg$(if ($detail) { ' | ' + $detail } else { '' })"
+}`
+    const lines = []
+    await psSession.run(script, l => lines.push(l), 120000)
+    const errorLine = lines.find(l => l.startsWith('ERROR:'))
+    if (errorLine) return { success: false, error: errorLine.slice('ERROR:'.length).trim() }
+    return { success: lines.some(l => l.trim() === 'SUCCESS') }
+  }
+
+  // Recreates an Exchange policy from a backup snapshot by replaying its saved
+  // properties as parameters to the matching New-* cmdlet. Properties that
+  // aren't parameters of that cmdlet (derived/read-only values like IsDefault,
+  // Guid, or the aliases the backup writer added) are filtered out; a name
+  // collision gets a "(Restored ...)" suffix so restore never overwrites.
+  const restoreExoPolicy = async (policy) => {
+    const meta = EXO_KIND_META[policy?.kind]
+    if (!meta) return { success: false, error: `Backup is missing a recognized Exchange policy type (kind: ${policy?.kind || 'none'})` }
+    try {
+      await psSession.connectExo()
+    } catch (err) {
+      return { success: false, error: `Could not connect to Exchange Online: ${err.message}` }
+    }
+    const b64 = Buffer.from(JSON.stringify(policy)).toString('base64')
+    const script = `
+try {
+  $json = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64}'))
+  $obj = $json | ConvertFrom-Json
+  $cmd = Get-Command ${meta.new} -ErrorAction Stop
+  $params = @{}
+  foreach ($prop in $obj.PSObject.Properties) {
+    $n = $prop.Name
+    if ($n -in @('Name','Identity','Guid','Id','DisplayName','kind','IsDefault','State','WhenChanged','WhenCreated')) { continue }
+    if (-not $cmd.Parameters.ContainsKey($n)) { continue }
+    $v = $prop.Value
+    if ($null -eq $v) { continue }
+    if ($v -is [string] -and [string]::IsNullOrEmpty($v)) { continue }
+    if ($v -is [System.Collections.ICollection] -and $v.Count -eq 0) { continue }
+    $params[$n] = $v
+  }
+  if ($obj.State -and "$($obj.State)" -eq 'Disabled' -and $cmd.Parameters.ContainsKey('Enabled') -and -not $params.ContainsKey('Enabled')) {
+    $params['Enabled'] = $false
+  }
+  $name = if ($obj.Name) { "$($obj.Name)" } else { 'Restored policy' }
+  $existing = ${meta.get} -Identity $name -ErrorAction SilentlyContinue
+  if ($existing) { $name = "$name (Restored $(Get-Date -Format 'yyyyMMdd-HHmm'))" }
+  $params['Name'] = $name
+  $null = & $cmd @params
+  Write-Output "SUCCESS"
+} catch {
+  Write-Output "ERROR: $($_.Exception.Message)"
+}`
+    const lines = []
+    await psSession.run(script, l => lines.push(l), 180000)
+    const errorLine = lines.find(l => l.startsWith('ERROR:'))
+    if (errorLine) return { success: false, error: errorLine.slice('ERROR:'.length).trim() }
+    return { success: lines.some(l => l.trim() === 'SUCCESS') }
+  }
+
+  ipcMain.handle('backup:restore', async (_, policy, policyType = 'ca') => {
     if (!psSession.alive) return { success: false, error: 'No active session — connect a tenant to restore policies' }
+    if (policyType === 'intune') {
+      try { return await restoreCompliancePolicy(policy) } catch (err) { return { success: false, error: err.message } }
+    }
+    if (policyType === 'exo') {
+      try { return await restoreExoPolicy(policy) } catch (err) { return { success: false, error: err.message } }
+    }
     try {
       const cleaned = cleanPolicyForRestore(policy)
       const b64 = Buffer.from(JSON.stringify(cleaned)).toString('base64')

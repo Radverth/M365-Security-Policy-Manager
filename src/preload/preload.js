@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('api', {
     // Exchange Online named policies (anti-spam / malware / phishing / mail flow rules)
     listExo: () => ipcRenderer.invoke('policies:listExo'),
     deleteExo: (kind, identity) => ipcRenderer.invoke('policies:deleteExo', kind, identity),
+    toggleExo: (kind, identity, enable) => ipcRenderer.invoke('policies:toggleExo', kind, identity, enable),
   },
 
   // Backup / Restore
@@ -65,7 +66,8 @@ contextBridge.exposeInMainWorld('api', {
     uploadToItGlue: (data) => ipcRenderer.invoke('backup:uploadToItGlue', data),
     list: () => ipcRenderer.invoke('backup:list'),
     get: (filename) => ipcRenderer.invoke('backup:get', filename),
-    restore: (policy) => ipcRenderer.invoke('backup:restore', policy),
+    /** policyType: 'ca' (default) | 'intune' | 'exo' — matches the backup file's policyType */
+    restore: (policy, policyType) => ipcRenderer.invoke('backup:restore', policy, policyType),
     delete: (filename) => ipcRenderer.invoke('backup:delete', filename),
     openDir: () => ipcRenderer.invoke('backup:openDir'),
   },
