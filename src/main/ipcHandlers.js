@@ -1998,6 +1998,174 @@ try {
     return { success: lines.some(l => l.trim() === 'SUCCESS') }
   })
 
+  // ── Intune device compliance policies ─────────────────────────────────────
+  // Discrete Graph objects (unlike the SharePoint/Teams/Tenant settings the
+  // wizard also deploys), so they list and delete cleanly. The @odata.type
+  // (e.g. #microsoft.graph.windows10CompliancePolicy) tells us the platform.
+  ipcMain.handle('policies:listCompliance', async () => {
+    if (!psSession.alive) return { error: 'No active session' }
+    try {
+      const lines = []
+      await psSession.run(
+        `try {
+  $pols = @(Get-MgDeviceManagementDeviceCompliancePolicy -All)
+  $out = @($pols | ForEach-Object {
+    [ordered]@{
+      Id = $_.Id
+      DisplayName = $_.DisplayName
+      Description = $_.Description
+      ODataType = $_.AdditionalProperties.'@odata.type'
+      CreatedDateTime = $_.CreatedDateTime
+      LastModifiedDateTime = $_.LastModifiedDateTime
+      Version = $_.Version
+    }
+  })
+  Write-Output "COMPLIANCE_JSON_START"
+  ConvertTo-Json -InputObject $out -Depth 6 -Compress
+  Write-Output "COMPLIANCE_JSON_END"
+} catch {
+  Write-Output "ERROR: $($_.Exception.Message)"
+}`,
+        (line) => lines.push(line),
+        120000
+      )
+      const startIdx = lines.indexOf('COMPLIANCE_JSON_START')
+      const endIdx = lines.indexOf('COMPLIANCE_JSON_END')
+      if (startIdx !== -1 && endIdx > startIdx) {
+        const json = lines.slice(startIdx + 1, endIdx).join('').trim()
+        if (!json) return { policies: [], context: psSession.context }
+        let parsed
+        try {
+          parsed = JSON.parse(json)
+        } catch (parseErr) {
+          logger.error(`policies:listCompliance JSON parse failed: ${parseErr.message} — head: ${json.slice(0, 200)}`)
+          return { error: `Compliance policy data could not be parsed (${parseErr.message}).` }
+        }
+        const arr = (Array.isArray(parsed) ? parsed : (parsed ? [parsed] : [])).filter(Boolean)
+        return { policies: arr, context: psSession.context }
+      }
+      const errLine = lines.find(l => l.startsWith('ERROR:'))
+      if (errLine) return { error: errLine.slice(6).trim() }
+      return { policies: [], context: psSession.context }
+    } catch (err) {
+      return { error: err.message }
+    }
+  })
+
+  ipcMain.handle('policies:deleteCompliance', async (_, id) => {
+    const safeId = safe(id)
+    const script = `
+try {
+  Remove-MgDeviceManagementDeviceCompliancePolicy -DeviceCompliancePolicyId '${safeId}' -ErrorAction Stop
+  Write-Output "SUCCESS"
+} catch {
+  Write-Output "ERROR: $($_.Exception.Message)"
+}`
+    const output = await psSession.run(script)
+    const lines = output.split('\n')
+    const errorLine = lines.find(l => l.startsWith('ERROR:'))
+    if (errorLine) throw new Error(errorLine.slice('ERROR:'.length).trim())
+    return { success: lines.some(l => l.trim() === 'SUCCESS') }
+  })
+
+  // ── Exchange Online named policies ────────────────────────────────────────
+  // Aggregates the four discrete, named policy types the wizard creates in EXO:
+  // anti-spam (hosted content filter), anti-malware, anti-phishing, and mail
+  // flow (transport) rules. Requires an Exchange Online connection — reuses the
+  // one-sign-in-per-tenant session helper. Default policies (IsDefault) are
+  // flagged so the UI can prevent deletion of built-in Microsoft policies.
+  const EXO_KIND_META = {
+    antispam:    { type: 'Anti-Spam',       remove: 'Remove-HostedContentFilterPolicy' },
+    antimalware: { type: 'Anti-Malware',    remove: 'Remove-MalwareFilterPolicy' },
+    antiphish:   { type: 'Anti-Phishing',   remove: 'Remove-AntiPhishPolicy' },
+    transport:   { type: 'Mail Flow Rule',  remove: 'Remove-TransportRule' },
+  }
+
+  ipcMain.handle('policies:listExo', async () => {
+    if (!psSession.alive) return { error: 'No active session' }
+    try {
+      // Connect Exchange Online in-session (may prompt device code on first use;
+      // it streams to the log like any other session output).
+      try {
+        await psSession.connectExo()
+      } catch (err) {
+        return { error: `Could not connect to Exchange Online: ${err.message}` }
+      }
+      const lines = []
+      await psSession.run(
+        `try {
+  $result = [ordered]@{
+    antispam    = @(Get-HostedContentFilterPolicy -ErrorAction SilentlyContinue | ForEach-Object { [ordered]@{ Name = "$($_.Name)"; Identity = "$($_.Identity)"; IsDefault = [bool]$_.IsDefault } })
+    antimalware = @(Get-MalwareFilterPolicy -ErrorAction SilentlyContinue | ForEach-Object { [ordered]@{ Name = "$($_.Name)"; Identity = "$($_.Identity)"; IsDefault = [bool]$_.IsDefault } })
+    antiphish   = @(Get-AntiPhishPolicy -ErrorAction SilentlyContinue | ForEach-Object { [ordered]@{ Name = "$($_.Name)"; Identity = "$($_.Identity)"; IsDefault = [bool]$_.IsDefault; Enabled = [bool]$_.Enabled } })
+    transport   = @(Get-TransportRule -ErrorAction SilentlyContinue | ForEach-Object { [ordered]@{ Name = "$($_.Name)"; Identity = "$($_.Identity)"; State = "$($_.State)"; Priority = $_.Priority } })
+  }
+  Write-Output "EXO_JSON_START"
+  ConvertTo-Json -InputObject $result -Depth 6 -Compress
+  Write-Output "EXO_JSON_END"
+} catch {
+  Write-Output "ERROR: $($_.Exception.Message)"
+}`,
+        (line) => lines.push(line),
+        180000
+      )
+      const startIdx = lines.indexOf('EXO_JSON_START')
+      const endIdx = lines.indexOf('EXO_JSON_END')
+      if (startIdx === -1 || endIdx <= startIdx) {
+        const errLine = lines.find(l => l.startsWith('ERROR:'))
+        if (errLine) return { error: errLine.slice(6).trim() }
+        return { policies: [], context: psSession.context }
+      }
+      const json = lines.slice(startIdx + 1, endIdx).join('').trim()
+      if (!json) return { policies: [], context: psSession.context }
+      let parsed
+      try {
+        parsed = JSON.parse(json)
+      } catch (parseErr) {
+        logger.error(`policies:listExo JSON parse failed: ${parseErr.message} — head: ${json.slice(0, 200)}`)
+        return { error: `Exchange policy data could not be parsed (${parseErr.message}).` }
+      }
+      // Flatten the four buckets into one array with a normalized shape.
+      const asArray = (v) => Array.isArray(v) ? v : (v ? [v] : [])
+      const policies = []
+      for (const [kind, meta] of Object.entries(EXO_KIND_META)) {
+        for (const p of asArray(parsed[kind])) {
+          policies.push({
+            kind,
+            type: meta.type,
+            name: p.Name,
+            identity: p.Identity != null ? String(p.Identity) : p.Name,
+            isDefault: !!p.IsDefault,
+            // Only anti-phish and transport rules carry a real enabled/disabled state.
+            state: kind === 'transport' ? p.State : (kind === 'antiphish' ? (p.Enabled ? 'Enabled' : 'Disabled') : null),
+            priority: p.Priority != null ? p.Priority : null,
+          })
+        }
+      }
+      return { policies, context: psSession.context }
+    } catch (err) {
+      return { error: err.message }
+    }
+  })
+
+  ipcMain.handle('policies:deleteExo', async (_, kind, identity) => {
+    const meta = EXO_KIND_META[kind]
+    if (!meta) throw new Error(`Unknown Exchange policy type: ${kind}`)
+    const safeId = safe(identity)
+    const script = `
+try {
+  ${meta.remove} -Identity '${safeId}' -Confirm:$false -ErrorAction Stop
+  Write-Output "SUCCESS"
+} catch {
+  Write-Output "ERROR: $($_.Exception.Message)"
+}`
+    const output = await psSession.run(script, null, 120000)
+    const lines = output.split('\n')
+    const errorLine = lines.find(l => l.startsWith('ERROR:'))
+    if (errorLine) throw new Error(errorLine.slice('ERROR:'.length).trim())
+    return { success: lines.some(l => l.trim() === 'SUCCESS') }
+  })
+
   // ── Backup / Restore ──────────────────────────────────────────────────────
   const getBackupDir = () => path.join(app.getPath('userData'), 'policy-backups')
 

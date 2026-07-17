@@ -845,6 +845,352 @@ function PolicyEditor({ policy, onSave, onCancel, saving, noSession }) {
   )
 }
 
+// ── Intune compliance & Exchange helpers ──────────────────────────────────────
+
+// Turn a Graph @odata.type (e.g. "#microsoft.graph.windows10CompliancePolicy")
+// into a friendly platform label for the Intune tab.
+function intunePlatform(odataType) {
+  if (!odataType) return 'Unknown'
+  const t = odataType.replace('#microsoft.graph.', '').replace(/CompliancePolicy$/, '')
+  const map = {
+    windows10: 'Windows', windows81: 'Windows', windowsPhone81: 'Windows Phone',
+    macOS: 'macOS', ios: 'iOS',
+    android: 'Android', androidWorkProfile: 'Android (Work Profile)',
+    androidDeviceOwner: 'Android (Device Owner)', aospDeviceOwner: 'Android (AOSP)',
+  }
+  return map[t] || (t.charAt(0).toUpperCase() + t.slice(1))
+}
+
+// Enabled/Disabled badge for the Exchange tab (EXO uses different state strings
+// than CA, and several policy types have no state at all).
+function exoStateBadge(state) {
+  if (!state) return <span className="text-xs text-gray-400">—</span>
+  const s = String(state).toLowerCase()
+  if (s === 'enabled') return <Badge variant="success">Enabled</Badge>
+  if (s === 'disabled') return <Badge variant="neutral">Disabled</Badge>
+  return <Badge variant="neutral">{state}</Badge>
+}
+
+const EXO_TYPE_BADGE = {
+  'Anti-Spam':      'bg-blue-100 text-blue-700',
+  'Anti-Malware':   'bg-red-100 text-red-700',
+  'Anti-Phishing':  'bg-purple-100 text-purple-700',
+  'Mail Flow Rule': 'bg-teal-100 text-teal-700',
+}
+
+// Shared empty / loading / no-session states for the secondary tabs.
+function TabPlaceholder({ loading, connected, emptyLabel, emptyHint }) {
+  if (!connected) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+        <svg className="w-12 h-12 mb-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+        </svg>
+        <p className="text-sm">Connect to a tenant above to view its policies.</p>
+      </div>
+    )
+  }
+  if (loading) {
+    return (
+      <div className="py-16 flex items-center justify-center gap-2 text-gray-400 text-sm">
+        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+        </svg>
+        Loading policies…
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+      <svg className="w-10 h-10 mb-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+      <p className="text-sm font-medium">{emptyLabel}</p>
+      {emptyHint && <p className="text-xs text-gray-300 mt-1">{emptyHint}</p>}
+    </div>
+  )
+}
+
+// ── Intune compliance policies tab ─────────────────────────────────────────────
+function IntunePolicyTable({ policies, loading, loaded, connected, onRefresh, onDelete }) {
+  const [search, setSearch] = useState('')
+  const [detailTarget, setDetailTarget] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
+
+  const filtered = policies.filter(p => {
+    if (!search) return true
+    const q = search.toLowerCase()
+    return (p.DisplayName || '').toLowerCase().includes(q) ||
+      intunePlatform(p.ODataType).toLowerCase().includes(q)
+  })
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    setDeleteLoading(true)
+    try {
+      await onDelete(deleteTarget.Id)
+    } finally {
+      setDeleteLoading(false)
+      setDeleteTarget(null)
+    }
+  }
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <SearchInput value={search} onChange={setSearch} placeholder="Search compliance policies..." className="w-72" />
+        <Button size="sm" variant="secondary" onClick={onRefresh} loading={loading}>
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          Refresh
+        </Button>
+      </div>
+
+      <Card>
+        {(!loaded || loading || policies.length === 0) ? (
+          <TabPlaceholder
+            loading={loading}
+            connected={connected}
+            emptyLabel="No device compliance policies found"
+            emptyHint="Deploy Intune / Endpoint policies from Create Policies to see them here."
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Platform</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Modified</th>
+                  <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filtered.map(policy => (
+                  <tr key={policy.Id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-gray-900">{policy.DisplayName}</div>
+                      {policy.Description && <div className="text-xs text-gray-400 truncate max-w-md">{policy.Description}</div>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                        {intunePlatform(policy.ODataType)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{formatDate(policy.LastModifiedDateTime)}</td>
+                    <td className="px-6 py-3 text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button size="sm" variant="ghost" onClick={() => setDetailTarget(policy)}>Details</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(policy)}>
+                          <span className="text-red-600">Delete</span>
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {/* Details modal */}
+      <Modal
+        open={!!detailTarget}
+        onClose={() => setDetailTarget(null)}
+        title={detailTarget?.DisplayName || 'Compliance Policy'}
+        size="lg"
+      >
+        <div className="pt-2 pb-4">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 divide-y divide-gray-100">
+            <SummaryRow label="Platform" value={intunePlatform(detailTarget?.ODataType)} />
+            <SummaryRow label="Description" value={detailTarget?.Description || '—'} />
+            <SummaryRow label="Created" value={formatDate(detailTarget?.CreatedDateTime)} />
+            <SummaryRow label="Modified" value={formatDate(detailTarget?.LastModifiedDateTime)} />
+            <SummaryRow label="Version" value={detailTarget?.Version != null ? String(detailTarget.Version) : '—'} />
+            <SummaryRow label="ID" value={detailTarget?.Id} />
+          </div>
+          <p className="text-xs text-gray-400 mt-3">Compliance rules and assignments are managed in the Intune admin center.</p>
+        </div>
+      </Modal>
+
+      {/* Delete confirm */}
+      <Modal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        variant="danger"
+        title="Delete Compliance Policy"
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={confirmDelete}
+        loading={deleteLoading}
+      >
+        <div className="py-2 space-y-3">
+          <p>Delete <strong>{deleteTarget?.DisplayName}</strong>? This removes the compliance policy and its assignments from Intune. This cannot be undone.</p>
+          <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+            <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <p className="text-xs text-amber-800">Intune policies are not covered by the Conditional Access backup system.</p>
+          </div>
+        </div>
+      </Modal>
+    </>
+  )
+}
+
+// ── Exchange Online policies tab ───────────────────────────────────────────────
+function ExoPolicyTable({ policies, loading, loaded, connected, onRefresh, onDelete }) {
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+  const [detailTarget, setDetailTarget] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
+
+  const types = [...new Set(policies.map(p => p.type))]
+  const filtered = policies.filter(p => {
+    if (typeFilter && p.type !== typeFilter) return false
+    if (!search) return true
+    const q = search.toLowerCase()
+    return (p.name || '').toLowerCase().includes(q) || (p.type || '').toLowerCase().includes(q)
+  })
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    setDeleteLoading(true)
+    try {
+      await onDelete(deleteTarget.kind, deleteTarget.identity)
+    } finally {
+      setDeleteLoading(false)
+      setDeleteTarget(null)
+    }
+  }
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-2">
+          <SearchInput value={search} onChange={setSearch} placeholder="Search Exchange policies..." className="w-64" />
+          {types.length > 1 && (
+            <select
+              value={typeFilter}
+              onChange={e => setTypeFilter(e.target.value)}
+              className="rounded-md border border-gray-300 text-sm px-2 py-1.5 focus:border-navy focus:ring-1 focus:ring-navy"
+            >
+              <option value="">All types</option>
+              {types.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          )}
+        </div>
+        <Button size="sm" variant="secondary" onClick={onRefresh} loading={loading}>
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          Refresh
+        </Button>
+      </div>
+
+      <Card>
+        {(!loaded || loading || policies.length === 0) ? (
+          <TabPlaceholder
+            loading={loading}
+            connected={connected}
+            emptyLabel="No Exchange Online policies found"
+            emptyHint="Anti-spam, anti-malware, anti-phishing, and mail flow rules appear here once loaded."
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">State</th>
+                  <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filtered.map((policy, idx) => (
+                  <tr key={`${policy.kind}-${policy.identity}-${idx}`} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900">{policy.name}</span>
+                        {policy.isDefault && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">Default</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${EXO_TYPE_BADGE[policy.type] || 'bg-gray-100 text-gray-600'}`}>
+                        {policy.type}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">{exoStateBadge(policy.state)}</td>
+                    <td className="px-6 py-3 text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button size="sm" variant="ghost" onClick={() => setDetailTarget(policy)}>Details</Button>
+                        {!policy.isDefault && (
+                          <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(policy)}>
+                            <span className="text-red-600">Delete</span>
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {/* Details modal */}
+      <Modal
+        open={!!detailTarget}
+        onClose={() => setDetailTarget(null)}
+        title={detailTarget?.name || 'Exchange Policy'}
+        size="lg"
+      >
+        <div className="pt-2 pb-4">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 divide-y divide-gray-100">
+            <SummaryRow label="Type" value={detailTarget?.type} />
+            <SummaryRow label="State" value={detailTarget?.state || 'Not applicable'} />
+            {detailTarget?.priority != null && <SummaryRow label="Priority" value={String(detailTarget.priority)} />}
+            <SummaryRow label="Default policy" value={detailTarget?.isDefault ? 'Yes (built-in)' : 'No'} />
+            <SummaryRow label="Identity" value={detailTarget?.identity} />
+          </div>
+          <p className="text-xs text-gray-400 mt-3">Full policy settings are managed in the Exchange admin center or Microsoft Defender portal.</p>
+        </div>
+      </Modal>
+
+      {/* Delete confirm */}
+      <Modal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        variant="danger"
+        title={`Delete ${deleteTarget?.type || 'Policy'}`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={confirmDelete}
+        loading={deleteLoading}
+      >
+        <div className="py-2 space-y-3">
+          <p>Delete <strong>{deleteTarget?.name}</strong> ({deleteTarget?.type})? This cannot be undone.</p>
+          <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+            <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <p className="text-xs text-amber-800">Exchange policies are not covered by the Conditional Access backup system.</p>
+          </div>
+        </div>
+      </Modal>
+    </>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function ManagePolicies() {
   const { addNotification, tenantSession, openConnectModal, openSwitchModal } = useStore()
@@ -867,6 +1213,14 @@ export default function ManagePolicies() {
   const [showBackupDest, setShowBackupDest] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [itglueUploading, setItglueUploading] = useState(false)
+  // Secondary policy tabs (Intune compliance, Exchange named policies)
+  const [activeTab, setActiveTab] = useState('ca')
+  const [intunePolicies, setIntunePolicies] = useState([])
+  const [intuneLoading, setIntuneLoading] = useState(false)
+  const [intuneLoaded, setIntuneLoaded] = useState(false)
+  const [exoPolicies, setExoPolicies] = useState([])
+  const [exoLoading, setExoLoading] = useState(false)
+  const [exoLoaded, setExoLoaded] = useState(false)
   // Effective connection: prefer local connectedAs, fall back to global session
   const effectiveSession = connectedAs || tenantSession
 
@@ -1020,8 +1374,85 @@ export default function ManagePolicies() {
       setConnectedAs(null)
       setPolicies([])
       setSelectedRows(new Set())
+      setIntunePolicies([]); setIntuneLoaded(false)
+      setExoPolicies([]); setExoLoaded(false)
     }
   }, [tenantSession])
+
+  // ── Intune compliance policies ────────────────────────────────────────────
+  const handleLoadIntune = async () => {
+    if (!window.api?.policies?.listCompliance) return
+    setIntuneLoading(true)
+    try {
+      const result = await window.api.policies.listCompliance()
+      if (result?.error) {
+        addNotification('Failed to load compliance policies: ' + result.error, 'error')
+        return
+      }
+      setIntunePolicies(Array.isArray(result?.policies) ? result.policies : [])
+      if (result?.context) setConnectedAs(result.context)
+      setIntuneLoaded(true)
+    } catch (err) {
+      addNotification('Failed to load compliance policies: ' + err.message, 'error')
+    } finally {
+      setIntuneLoading(false)
+    }
+  }
+
+  const handleDeleteIntune = async (id) => {
+    try {
+      const res = await window.api.policies.deleteCompliance(id)
+      if (res?.success) {
+        setIntunePolicies(ps => ps.filter(p => p.Id !== id))
+        addNotification('Compliance policy deleted', 'success')
+      } else {
+        addNotification('Delete failed', 'error')
+      }
+    } catch (err) {
+      addNotification('Delete failed: ' + err.message, 'error')
+    }
+  }
+
+  // ── Exchange Online named policies ────────────────────────────────────────
+  const handleLoadExo = async () => {
+    if (!window.api?.policies?.listExo) return
+    setExoLoading(true)
+    try {
+      const result = await window.api.policies.listExo()
+      if (result?.error) {
+        addNotification('Failed to load Exchange policies: ' + result.error, 'error')
+        return
+      }
+      setExoPolicies(Array.isArray(result?.policies) ? result.policies : [])
+      if (result?.context) setConnectedAs(result.context)
+      setExoLoaded(true)
+    } catch (err) {
+      addNotification('Failed to load Exchange policies: ' + err.message, 'error')
+    } finally {
+      setExoLoading(false)
+    }
+  }
+
+  const handleDeleteExo = async (kind, identity) => {
+    try {
+      const res = await window.api.policies.deleteExo(kind, identity)
+      if (res?.success) {
+        setExoPolicies(ps => ps.filter(p => !(p.kind === kind && p.identity === identity)))
+        addNotification('Exchange policy deleted', 'success')
+      } else {
+        addNotification('Delete failed', 'error')
+      }
+    } catch (err) {
+      addNotification('Delete failed: ' + err.message, 'error')
+    }
+  }
+
+  // Lazy-load a secondary tab's data the first time it's opened on a live session
+  useEffect(() => {
+    if (!effectiveSession) return
+    if (activeTab === 'intune' && !intuneLoaded && !intuneLoading) handleLoadIntune()
+    if (activeTab === 'exchange' && !exoLoaded && !exoLoading) handleLoadExo()
+  }, [activeTab, effectiveSession])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSwitchTenant = () => openSwitchModal()
 
@@ -1133,7 +1564,7 @@ export default function ManagePolicies() {
     <div className="p-8 max-w-7xl mx-auto">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">Manage Policies</h1>
-        <p className="mt-1 text-sm text-gray-500">View and manage Conditional Access policies for a connected tenant</p>
+        <p className="mt-1 text-sm text-gray-500">View and manage Conditional Access, Intune compliance, and Exchange Online policies for a connected tenant</p>
       </div>
 
       {/* Connection card */}
@@ -1213,6 +1644,38 @@ export default function ManagePolicies() {
         </Card.Body>
       </Card>
 
+      {/* Policy-domain tabs */}
+      {effectiveSession && (
+        <div className="flex items-center gap-1 mb-5 border-b border-gray-200">
+          {[
+            { id: 'ca', label: 'Conditional Access', count: policies.length || null },
+            { id: 'intune', label: 'Intune Compliance', count: intuneLoaded ? intunePolicies.length : null },
+            { id: 'exchange', label: 'Exchange Online', count: exoLoaded ? exoPolicies.length : null },
+          ].map(t => (
+            <button
+              key={t.id}
+              onClick={() => setActiveTab(t.id)}
+              className={[
+                'relative px-4 py-2.5 text-sm font-medium transition-colors -mb-px border-b-2',
+                activeTab === t.id
+                  ? 'border-navy text-navy'
+                  : 'border-transparent text-gray-500 hover:text-gray-700',
+              ].join(' ')}
+            >
+              {t.label}
+              {t.count != null && (
+                <span className={[
+                  'ml-2 px-1.5 py-0.5 rounded-full text-xs',
+                  activeTab === t.id ? 'bg-navy-50 text-navy' : 'bg-gray-100 text-gray-500',
+                ].join(' ')}>{t.count}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── Conditional Access tab ── */}
+      {activeTab === 'ca' && (<>
       {/* Toolbar */}
       {policies.length > 0 && (
         <div className="flex items-center justify-between gap-3 mb-4">
@@ -1356,6 +1819,31 @@ export default function ManagePolicies() {
           </div>
         )}
       </Card>
+      </>)}
+
+      {/* ── Intune compliance tab ── */}
+      {activeTab === 'intune' && (
+        <IntunePolicyTable
+          policies={intunePolicies}
+          loading={intuneLoading}
+          loaded={intuneLoaded}
+          connected={!!effectiveSession}
+          onRefresh={handleLoadIntune}
+          onDelete={handleDeleteIntune}
+        />
+      )}
+
+      {/* ── Exchange Online tab ── */}
+      {activeTab === 'exchange' && (
+        <ExoPolicyTable
+          policies={exoPolicies}
+          loading={exoLoading}
+          loaded={exoLoaded}
+          connected={!!effectiveSession}
+          onRefresh={handleLoadExo}
+          onDelete={handleDeleteExo}
+        />
+      )}
 
       {/* Delete confirmation modal */}
       <Modal

@@ -49,6 +49,12 @@ contextBridge.exposeInMainWorld('api', {
     update: (id, patch) => ipcRenderer.invoke('policies:update', id, patch),
     delete: (id) => ipcRenderer.invoke('policies:delete', id),
     toggleState: (id, state) => ipcRenderer.invoke('policies:toggleState', id, state),
+    // Intune device compliance policies (Graph device management objects)
+    listCompliance: () => ipcRenderer.invoke('policies:listCompliance'),
+    deleteCompliance: (id) => ipcRenderer.invoke('policies:deleteCompliance', id),
+    // Exchange Online named policies (anti-spam / malware / phishing / mail flow rules)
+    listExo: () => ipcRenderer.invoke('policies:listExo'),
+    deleteExo: (kind, identity) => ipcRenderer.invoke('policies:deleteExo', kind, identity),
   },
 
   // Backup / Restore
