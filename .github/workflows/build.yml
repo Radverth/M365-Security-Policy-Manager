@@ -109,6 +109,7 @@ jobs:
           path: |
             dist-electron/*.exe
             dist-electron/latest.yml
+          retention-days: 3
 
       - name: Upload Linux artifact
         if: runner.os == 'Linux'
@@ -119,6 +120,7 @@ jobs:
             dist-electron/*.deb
             dist-electron/*.AppImage
             dist-electron/latest-linux.yml
+          retention-days: 3
 
   # ── 3a. Both builds passed → attach artifacts and publish ──────────────────
   publish-release:
